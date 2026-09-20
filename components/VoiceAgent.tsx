@@ -94,9 +94,15 @@ export default function VoiceAgent() {
     }
   }, []);
 
-  const speak = useCallback(
+  // Browser TTS as a last resort — robotic, but keeps the assistant from
+  // going silent if ElevenLabs isn't configured or the request fails.
+  const speakFallback = useCallback(
     (text: string) => {
-      if (!text || typeof window === "undefined" || !window.speechSynthesis) return;
+      if (!text || typeof window === "undefined" || !window.speechSynthesis) {
+        setStatus("wake");
+        resumeListening();
+        return;
+      }
       window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       utter.rate = 1.02;
@@ -109,6 +115,37 @@ export default function VoiceAgent() {
       window.speechSynthesis.speak(utter);
     },
     [resumeListening],
+  );
+
+  const speak = useCallback(
+    async (text: string) => {
+      if (!text) return;
+      setStatus("speaking");
+      try {
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok) throw new Error(`TTS request failed (${res.status})`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          setStatus("wake");
+          resumeListening();
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          speakFallback(text);
+        };
+        await audio.play();
+      } catch {
+        speakFallback(text);
+      }
+    },
+    [resumeListening, speakFallback],
   );
 
   const describeAction = (a: ActionLogEntry) => {
