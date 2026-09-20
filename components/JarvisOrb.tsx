@@ -116,27 +116,6 @@ export default function JarvisOrb() {
 
       <div className="hud hud-title">U.L.T.R.O.N.</div>
 
-      <div className="hud hud-hint">
-        <div>
-          <span className="key">DRAG</span> spin&nbsp;&nbsp;
-          <span className="key">SCROLL</span> zoom
-        </div>
-        {cameraOn ? (
-          <div>
-            <span className="key">PINCH + MOVE</span> spin&nbsp;&nbsp;
-            <span className="key">PINCH BOTH HANDS ± SPREAD</span> zoom
-          </div>
-        ) : (
-          <div>
-            <span className="key">G</span> hand gestures&nbsp;&nbsp;
-            <span className="key">R</span> reset&nbsp;&nbsp;
-            <span className="key">+/−</span> zoom&nbsp;&nbsp;
-            say <span className="key">HEY ULTRON</span> to talk&nbsp;&nbsp;
-            <span className="key">V</span> mute mic
-          </div>
-        )}
-      </div>
-
       <VoiceAgent />
 
       <div className="hud hud-controls">
@@ -152,29 +131,6 @@ export default function JarvisOrb() {
         </div>
 
         {error && <div className="hud-error">{error}</div>}
-
-        <div className="hud-row">
-          <button
-            type="button"
-            className="hud-btn"
-            aria-pressed={cameraOn}
-            onClick={toggleGestures}
-            disabled={camera === "starting"}
-          >
-            {camera === "starting" ? "INITIALIZING…" : cameraOn ? "GESTURES ON" : "GESTURES OFF"}
-          </button>
-        </div>
-        <div className="hud-row">
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.zoomIn()} aria-label="Zoom in">
-            +
-          </button>
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.zoomOut()} aria-label="Zoom out">
-            −
-          </button>
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.resetView()}>
-            RESET
-          </button>
-        </div>
       </div>
     </>
   );

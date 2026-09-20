@@ -370,16 +370,6 @@ export default function VoiceAgent() {
           </div>
         </div>
       )}
-
-      <button
-        type="button"
-        className="hud-btn mic-btn"
-        aria-pressed={muted}
-        disabled={status === "unsupported"}
-        onClick={toggleMute}
-      >
-        {muted ? "🔇 MUTED — TAP TO RESUME (V)" : "🎙 ALWAYS ON — TAP TO MUTE (V)"}
-      </button>
     </div>
   );
 }
