@@ -3,13 +3,14 @@ import * as actions from "./systemActions";
 import * as gmail from "./gmailClient";
 import { placeHealthReportCall } from "./callReport";
 import * as spotify from "./spotifyClient";
+import { playVideo } from "./youtubeClient";
 
 export type ToolName =
   | "open_app"
   | "open_url"
   | "open_search"
   | "web_search"
-  | "play_music"
+  | "play_video"
   | "list_files"
   | "read_file"
   | "write_file"
@@ -33,7 +34,7 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "open_url",
   "open_search",
   "web_search",
-  "play_music",
+  "play_video",
   "list_files",
   "read_file",
   "search_files",
@@ -94,12 +95,12 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "play_music",
+    name: "play_video",
     description:
-      "Play a song, artist, or piece of music. Finds the actual video on YouTube and opens it with autoplay requested, so the user doesn't have to click play themselves. Use this instead of open_search whenever the user asks to 'play' something.",
+      "Find and open a specific YouTube video with autoplay requested, so the user doesn't have to search or click play themselves — a song, a trailer, a tutorial, highlights, anything on YouTube. Uses the YouTube Data API for accurate results. Use this instead of open_search whenever the user asks to 'play' or 'open and play' something.",
     input_schema: {
       type: "object",
-      properties: { query: { type: "string", description: "Song and/or artist name to play" } },
+      properties: { query: { type: "string", description: "What to find and play, e.g. a song/artist, a movie trailer, or a video topic" } },
       required: ["query"],
     },
   },
@@ -211,7 +212,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "spotify_play",
     description:
-      "Actually play music through Spotify (not just open the app) — searches for a song/artist/album and starts it playing on the user's active Spotify device via Spotify Connect. If no query is given, resumes whatever was paused. Opens the Spotify desktop app automatically if nothing is running yet. Requires Spotify to be connected and Premium; use play_music (YouTube) as a fallback if this errors.",
+      "Actually play music through Spotify (not just open the app) — searches for a song/artist/album and starts it playing on the user's active Spotify device via Spotify Connect. If no query is given, resumes whatever was paused. Opens the Spotify desktop app automatically if nothing is running yet. Requires Spotify to be connected and Premium; use play_video (YouTube) as a fallback if this errors.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "Song, artist, and/or album to search for and play. Omit to resume paused playback." } },
@@ -251,8 +252,8 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
       return actions.openSearch(String(input.query ?? ""), input.site ? String(input.site) : "google");
     case "web_search":
       return actions.webSearch(String(input.query ?? ""));
-    case "play_music":
-      return actions.playMusic(String(input.query ?? ""));
+    case "play_video":
+      return playVideo(String(input.query ?? ""));
     case "list_files":
       return actions.listFiles(input.path ? String(input.path) : ".");
     case "read_file":
