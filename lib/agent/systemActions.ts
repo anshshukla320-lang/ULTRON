@@ -24,6 +24,20 @@ function launchDetached(command: string, args: string[] = []): Promise<void> {
   });
 }
 
+/**
+ * Hands a target (URL, URI scheme, .lnk shortcut, or bare exe name) to
+ * Windows' own "open" mechanism — the same one behind double-click and the
+ * Run dialog. Spawning `explorer.exe <target>` directly is not reliable: it
+ * can report success without actually surfacing anything, since `explorer`
+ * only relays the request to the real shell process rather than opening it
+ * itself. `cmd /c start` is the confirmed-working native idiom for this.
+ * The empty "" argument is required so `start` doesn't mistake the target
+ * for its optional window-title argument when it's quoted.
+ */
+function openWithShell(target: string): Promise<void> {
+  return launchDetached("cmd.exe", ["/c", "start", "", target]);
+}
+
 const MAX_READ_BYTES = 100_000;
 const MAX_LIST_ENTRIES = 200;
 const MAX_SEARCH_RESULTS = 50;
@@ -91,19 +105,13 @@ export async function openApp(name: string): Promise<string> {
   const key = name.trim().toLowerCase();
   const known = KNOWN_APPS[key];
   if (known) {
-    if (known.endsWith(":")) {
-      // URI scheme (e.g. "ms-settings:") — explorer.exe is the reliable way
-      // to hand a URI scheme to the shell from the command line.
-      await launchDetached("explorer.exe", [known]);
-    } else {
-      await launchDetached(known);
-    }
+    await openWithShell(known);
     return `Launched "${name}".`;
   }
 
   const shortcut = await findShortcut(key);
   if (shortcut) {
-    await launchDetached("explorer.exe", [shortcut]);
+    await openWithShell(shortcut);
     return `Launched "${name}".`;
   }
 
@@ -122,7 +130,7 @@ export async function openUrl(rawUrl: string): Promise<string> {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Only http/https URLs can be opened (got "${url.protocol}").`);
   }
-  await launchDetached("explorer.exe", [url.toString()]);
+  await openWithShell(url.toString());
   return `Opened ${url.toString()} in the default browser.`;
 }
 
@@ -139,7 +147,7 @@ export async function openSearch(query: string, site = "google"): Promise<string
   const key = site.trim().toLowerCase();
   const build = SEARCH_SITES[key] ?? SEARCH_SITES.google;
   const url = build(query);
-  await launchDetached("explorer.exe", [url]);
+  await openWithShell(url);
   return `Opened a ${key in SEARCH_SITES ? key : "google"} search for "${query}" in the browser.`;
 }
 
@@ -193,14 +201,14 @@ export async function playMusic(query: string): Promise<string> {
     const videoId = match?.[1];
 
     if (videoId) {
-      await launchDetached("explorer.exe", [`https://www.youtube.com/watch?v=${videoId}&autoplay=1`]);
+      await openWithShell(`https://www.youtube.com/watch?v=${videoId}&autoplay=1`);
       return `Playing "${query}" on YouTube. If your browser blocks autoplay on the first try, one click on the video starts it.`;
     }
   } catch {
     // fall through to the search-page fallback below
   }
 
-  await launchDetached("explorer.exe", [SEARCH_SITES.youtube(query)]);
+  await openWithShell(SEARCH_SITES.youtube(query));
   return `Couldn't auto-play "${query}" — opened YouTube search results instead. Pick a track and press play manually.`;
 }
 
