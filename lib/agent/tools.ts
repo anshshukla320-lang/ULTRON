@@ -4,6 +4,7 @@ import * as gmail from "./gmailClient";
 import { placeHealthReportCall } from "./callReport";
 import * as spotify from "./spotifyClient";
 import { playVideo } from "./youtubeClient";
+import { rememberFact, forgetFact } from "./memory";
 
 export type ToolName =
   | "open_app"
@@ -25,7 +26,9 @@ export type ToolName =
   | "spotify_play"
   | "spotify_pause"
   | "spotify_next"
-  | "spotify_previous";
+  | "spotify_previous"
+  | "remember"
+  | "forget";
 
 /** Tools in here run immediately. Anything not listed requires the user to
  *  click "Confirm" in the UI before it executes. */
@@ -46,6 +49,8 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "spotify_pause",
   "spotify_next",
   "spotify_previous",
+  "remember",
+  "forget",
 ]);
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -235,6 +240,25 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "remember",
+    description:
+      "Save a short, genuinely useful fact or note to long-term memory so you can recall it in future conversations and phone calls — a preference the user states, a lasting detail about their setup, a durable fact worth carrying forward from a web search. Don't save trivial one-off command results or anything time-sensitive (like today's weather).",
+    input_schema: {
+      type: "object",
+      properties: { fact: { type: "string", description: "The fact or note to remember, written concisely in your own words" } },
+      required: ["fact"],
+    },
+  },
+  {
+    name: "forget",
+    description: "Remove previously remembered facts matching a search term. Use when the user corrects something or says a remembered fact is wrong or outdated.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Text to match against remembered facts; every matching entry is removed" } },
+      required: ["query"],
+    },
+  },
+  {
     name: "call_health_report",
     description:
       "Place a real phone call (via Twilio) to the user's phone number and read out a spoken summary of this PC's health — disk space, memory, CPU load, and recent system errors — plus any important unread Gmail messages. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and USER_PHONE_NUMBER to be set in .env.local. This places a real, billed phone call, so it always requires the user's explicit confirmation before it runs.",
@@ -274,6 +298,10 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
       return gmail.readEmail(String(input.id ?? ""));
     case "send_email":
       return gmail.sendEmail(String(input.to ?? ""), String(input.subject ?? ""), String(input.body ?? ""));
+    case "remember":
+      return rememberFact(String(input.fact ?? ""));
+    case "forget":
+      return forgetFact(String(input.query ?? ""));
     case "call_health_report":
       return placeHealthReportCall();
     case "spotify_play":
