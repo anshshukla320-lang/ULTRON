@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createOrbScene, type OrbSceneApi } from "@/lib/orbScene";
 import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
+import VoiceAgent from "@/components/VoiceAgent";
 
 type CameraState = "off" | "starting" | "on" | "error";
 
@@ -129,10 +130,14 @@ export default function JarvisOrb() {
           <div>
             <span className="key">G</span> hand gestures&nbsp;&nbsp;
             <span className="key">R</span> reset&nbsp;&nbsp;
-            <span className="key">+/−</span> zoom
+            <span className="key">+/−</span> zoom&nbsp;&nbsp;
+            say <span className="key">HEY ULTRON</span> to talk&nbsp;&nbsp;
+            <span className="key">V</span> mute mic
           </div>
         )}
       </div>
+
+      <VoiceAgent />
 
       <div className="hud hud-controls">
         <div className={`camera-panel${cameraOn ? " visible" : ""}`}>

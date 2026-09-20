@@ -228,8 +228,229 @@ body {
   text-shadow: 0 0 6px rgba(255, 170, 48, 0.8);
 }
 
+/* ——— Voice agent panel ——— */
+.agent-panel {
+  top: 24px;
+  right: 24px;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.agent-status {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-shadow: 0 0 8px rgba(255, 170, 48, 0.7);
+  opacity: 0.85;
+}
+
+.agent-status-wake {
+  opacity: 0.6;
+}
+
+.agent-status-listening {
+  color: #ff5533;
+  text-shadow: 0 0 10px rgba(255, 60, 30, 0.8);
+}
+
+.agent-status-thinking {
+  color: #ffcc66;
+}
+
+.agent-status-speaking {
+  color: #66ffcc;
+  text-shadow: 0 0 10px rgba(80, 255, 190, 0.7);
+}
+
+.agent-status-confirm {
+  color: #ff9933;
+}
+
+.agent-status-unsupported {
+  color: #886655;
+}
+
+.agent-interim {
+  font-size: 12px;
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.agent-log {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.5;
+  padding-right: 4px;
+}
+
+.agent-log::-webkit-scrollbar {
+  width: 4px;
+}
+
+.agent-log::-webkit-scrollbar-thumb {
+  background: rgba(255, 170, 48, 0.35);
+}
+
+.agent-entry {
+  letter-spacing: 0.03em;
+  opacity: 0.85;
+  word-break: break-word;
+}
+
+.agent-entry-prefix {
+  display: inline-block;
+  min-width: 42px;
+  margin-right: 6px;
+  font-weight: bold;
+  opacity: 0.7;
+}
+
+.agent-entry-user .agent-entry-prefix {
+  color: #ffcc66;
+}
+
+.agent-entry-agent .agent-entry-prefix {
+  color: #66ffcc;
+}
+
+.agent-entry-action {
+  opacity: 0.65;
+  font-size: 10px;
+}
+
+.agent-entry-error {
+  color: #ff5533;
+}
+
+.mic-btn {
+  width: 100%;
+}
+
+.confirm-modal {
+  border: 1px solid rgba(255, 153, 51, 0.6);
+  background: rgba(30, 15, 0, 0.75);
+  border-radius: 4px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 0 16px rgba(255, 140, 20, 0.2);
+}
+
+.confirm-title {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: #ff9933;
+}
+
+.confirm-item {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.confirm-detail {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-left: 2px solid rgba(255, 170, 48, 0.4);
+  font-size: 11px;
+  opacity: 0.8;
+  max-height: 100px;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.confirm-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.confirm-row .hud-btn {
+  flex: 1;
+  height: 36px;
+  font-size: 12px;
+}
+
+/* ——— Login / PIN gate ——— */
+.login-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, #1a0d00 0%, #000 75%);
+  font-family: "Courier New", monospace;
+}
+
+.login-box {
+  width: min(320px, calc(100vw - 48px));
+  padding: 28px 24px;
+  border: 1px solid rgba(255, 170, 48, 0.45);
+  border-radius: 6px;
+  background: rgba(20, 10, 0, 0.55);
+  box-shadow: 0 0 24px rgba(255, 140, 20, 0.18);
+  text-align: center;
+}
+
+.login-title {
+  color: #ffaa30;
+  font-size: 20px;
+  letter-spacing: 0.35em;
+  text-shadow: 0 0 12px rgba(255, 170, 48, 0.8);
+  margin-bottom: 6px;
+}
+
+.login-sub {
+  color: #ffaa30;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  opacity: 0.7;
+  margin-bottom: 20px;
+}
+
+.login-input {
+  width: 100%;
+  height: 44px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 170, 48, 0.45);
+  border-radius: 4px;
+  color: #ffcc66;
+  font-family: "Courier New", monospace;
+  font-size: 18px;
+  letter-spacing: 0.4em;
+  text-align: center;
+  outline: none;
+  margin-bottom: 12px;
+}
+
+.login-input:focus {
+  border-color: #ffcc66;
+  box-shadow: 0 0 10px rgba(255, 170, 48, 0.4);
+}
+
+.login-error {
+  color: #ff5533;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  margin-bottom: 12px;
+}
+
+.login-btn {
+  width: 100%;
+}
+
 @media (max-width: 600px) {
   .hud-hint {
     display: none;
+  }
+
+  .agent-panel {
+    width: calc(100vw - 48px);
   }
 }
