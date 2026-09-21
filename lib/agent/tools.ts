@@ -12,6 +12,8 @@ import * as contacts from "./contactsClient";
 import * as tasks from "./tasksClient";
 import { listRecentPhotos } from "./photosClient";
 import { getRecentLocationHistory } from "./locationHistory";
+import { runCode } from "./codeRunner";
+import { generatePalette } from "./colorPalette";
 
 export type ToolName =
   | "open_app"
@@ -47,7 +49,9 @@ export type ToolName =
   | "create_task"
   | "complete_task"
   | "list_recent_photos"
-  | "location_history";
+  | "location_history"
+  | "run_code"
+  | "generate_color_palette";
 
 /** Tools in here run immediately. Anything not listed requires the user to
  *  click "Confirm" in the UI before it executes. */
@@ -82,6 +86,7 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "complete_task",
   "list_recent_photos",
   "location_history",
+  "generate_color_palette",
 ]);
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -417,6 +422,32 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "run_code",
+    description:
+      "Run a short Node.js, Python, or PowerShell script with its working directory set to the agent's sandboxed workspace folder. This is NOT a real sandbox — the code runs with the same permissions as the user's own account, only the working directory is scoped — so it always requires the user's explicit confirmation before it runs. Times out after 15 seconds. Use for coding tasks: testing a snippet, running a script the user asked for, checking output.",
+    input_schema: {
+      type: "object",
+      properties: {
+        language: { type: "string", description: "One of: node, python, powershell" },
+        code: { type: "string", description: "The code to run" },
+      },
+      required: ["language", "code"],
+    },
+  },
+  {
+    name: "generate_color_palette",
+    description:
+      "Generate a real color-theory-based palette from a base hex color — complementary, analogous, triadic, or monochromatic — each hue returned as light/base/dark variants ready to use. Pure computation, no image generation involved. Use this whenever a design task calls for concrete color suggestions rather than vague advice.",
+    input_schema: {
+      type: "object",
+      properties: {
+        baseColor: { type: "string", description: "A 6-digit hex color, e.g. #3366FF" },
+        scheme: { type: "string", description: "One of: complementary, analogous, triadic, monochromatic" },
+      },
+      required: ["baseColor", "scheme"],
+    },
+  },
+  {
     name: "call_health_report",
     description:
       "Place a real phone call (via Twilio) to the user's phone number and read out a spoken summary of this PC's health — disk space, memory, CPU load, and recent system errors — plus any important unread Gmail messages. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and USER_PHONE_NUMBER to be set in .env.local. This places a real, billed phone call, so it always requires the user's explicit confirmation before it runs.",
@@ -489,6 +520,10 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
       return listRecentPhotos(input.maxResults ? Number(input.maxResults) : 10);
     case "location_history":
       return getRecentLocationHistory(input.limit ? Number(input.limit) : 10);
+    case "run_code":
+      return runCode(String(input.language ?? ""), String(input.code ?? ""));
+    case "generate_color_palette":
+      return generatePalette(String(input.baseColor ?? ""), String(input.scheme ?? ""));
     case "call_health_report":
       return placeHealthReportCall();
     case "spotify_play":
