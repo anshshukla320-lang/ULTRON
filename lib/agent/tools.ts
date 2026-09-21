@@ -14,6 +14,10 @@ import { listRecentPhotos } from "./photosClient";
 import { getRecentLocationHistory } from "./locationHistory";
 import { runCode } from "./codeRunner";
 import { generatePalette } from "./colorPalette";
+import { logExpense, expenseSummary, calculateLoan, convertCurrency } from "./financeTools";
+import { logWorkout, logMeal, fitnessSummary, calculateBmi, calculateCalorieTarget } from "./fitnessTools";
+import { analyzeWriting } from "./writingMetrics";
+import { analyzeCsv } from "./dataAnalysis";
 
 export type ToolName =
   | "open_app"
@@ -51,7 +55,18 @@ export type ToolName =
   | "list_recent_photos"
   | "location_history"
   | "run_code"
-  | "generate_color_palette";
+  | "generate_color_palette"
+  | "analyze_csv"
+  | "analyze_writing"
+  | "calculate_loan"
+  | "convert_currency"
+  | "log_expense"
+  | "expense_summary"
+  | "log_workout"
+  | "log_meal"
+  | "fitness_summary"
+  | "calculate_bmi"
+  | "calculate_calorie_target";
 
 /** Tools in here run immediately. Anything not listed requires the user to
  *  click "Confirm" in the UI before it executes. */
@@ -87,6 +102,17 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "list_recent_photos",
   "location_history",
   "generate_color_palette",
+  "analyze_csv",
+  "analyze_writing",
+  "calculate_loan",
+  "convert_currency",
+  "log_expense",
+  "expense_summary",
+  "log_workout",
+  "log_meal",
+  "fitness_summary",
+  "calculate_bmi",
+  "calculate_calorie_target",
 ]);
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -448,6 +474,134 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "analyze_csv",
+    description: "Analyze a CSV file in the agent's sandboxed workspace folder — row/column count, and per-column stats (min/max/mean/median for numeric columns, distinct-value count for text columns).",
+    input_schema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Relative path to the CSV file in the workspace" } },
+      required: ["path"],
+    },
+  },
+  {
+    name: "analyze_writing",
+    description: "Score a piece of writing objectively — word/sentence counts, Flesch reading-ease score, rough passive-voice count, longest sentence. Use this to ground a writing critique in real numbers before giving qualitative feedback.",
+    input_schema: {
+      type: "object",
+      properties: { text: { type: "string", description: "The text to analyze" } },
+      required: ["text"],
+    },
+  },
+  {
+    name: "calculate_loan",
+    description: "Calculate monthly payment and total interest for a loan given principal, annual interest rate, and term in years. Pure math, no bank involved.",
+    input_schema: {
+      type: "object",
+      properties: {
+        principal: { type: "number", description: "Loan amount" },
+        annualRatePct: { type: "number", description: "Annual interest rate as a percent, e.g. 6.5" },
+        years: { type: "number", description: "Loan term in years" },
+      },
+      required: ["principal", "annualRatePct", "years"],
+    },
+  },
+  {
+    name: "convert_currency",
+    description: "Convert an amount between currencies using live exchange rates.",
+    input_schema: {
+      type: "object",
+      properties: {
+        amount: { type: "number", description: "Amount to convert" },
+        from: { type: "string", description: "Source currency code, e.g. USD" },
+        to: { type: "string", description: "Target currency code, e.g. EUR" },
+      },
+      required: ["amount", "from", "to"],
+    },
+  },
+  {
+    name: "log_expense",
+    description: "Log a personal expense to a local ledger for later summary. No bank connection — this is manual tracking only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        amount: { type: "number", description: "Amount spent" },
+        category: { type: "string", description: "Category, e.g. groceries, rent, entertainment" },
+        note: { type: "string", description: "Optional note" },
+      },
+      required: ["amount", "category"],
+    },
+  },
+  {
+    name: "expense_summary",
+    description: "Summarize logged expenses by category over a recent period.",
+    input_schema: {
+      type: "object",
+      properties: { days: { type: "number", description: "Number of recent days to summarize, default 30" } },
+      required: [],
+    },
+  },
+  {
+    name: "log_workout",
+    description: "Log a workout to a local fitness log.",
+    input_schema: {
+      type: "object",
+      properties: {
+        description: { type: "string", description: "What the workout was, e.g. '5k run' or 'upper body strength'" },
+        durationMin: { type: "number", description: "Duration in minutes" },
+        notes: { type: "string", description: "Optional notes" },
+      },
+      required: ["description"],
+    },
+  },
+  {
+    name: "log_meal",
+    description: "Log a meal to a local nutrition log.",
+    input_schema: {
+      type: "object",
+      properties: {
+        description: { type: "string", description: "What was eaten" },
+        calories: { type: "number", description: "Estimated calories" },
+        notes: { type: "string", description: "Optional notes" },
+      },
+      required: ["description"],
+    },
+  },
+  {
+    name: "fitness_summary",
+    description: "Summarize logged workouts and meals over a recent period.",
+    input_schema: {
+      type: "object",
+      properties: { days: { type: "number", description: "Number of recent days to summarize, default 7" } },
+      required: [],
+    },
+  },
+  {
+    name: "calculate_bmi",
+    description: "Calculate BMI from height and weight. General estimate, not medical advice.",
+    input_schema: {
+      type: "object",
+      properties: {
+        heightCm: { type: "number", description: "Height in centimeters" },
+        weightKg: { type: "number", description: "Weight in kilograms" },
+      },
+      required: ["heightCm", "weightKg"],
+    },
+  },
+  {
+    name: "calculate_calorie_target",
+    description: "Estimate BMR and maintenance calories using the Mifflin-St Jeor equation. General estimate, not medical advice.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sex: { type: "string", description: "'male' or 'female'" },
+        ageYears: { type: "number" },
+        heightCm: { type: "number" },
+        weightKg: { type: "number" },
+        activityLevel: { type: "string", description: "One of: sedentary, light, moderate, active, very active" },
+      },
+      required: ["sex", "ageYears", "heightCm", "weightKg", "activityLevel"],
+    },
+  },
+  {
     name: "call_health_report",
     description:
       "Place a real phone call (via Twilio) to the user's phone number and read out a spoken summary of this PC's health — disk space, memory, CPU load, and recent system errors — plus any important unread Gmail messages. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and USER_PHONE_NUMBER to be set in .env.local. This places a real, billed phone call, so it always requires the user's explicit confirmation before it runs.",
@@ -524,6 +678,42 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
       return runCode(String(input.language ?? ""), String(input.code ?? ""));
     case "generate_color_palette":
       return generatePalette(String(input.baseColor ?? ""), String(input.scheme ?? ""));
+    case "analyze_csv":
+      return analyzeCsv(String(input.path ?? ""));
+    case "analyze_writing":
+      return analyzeWriting(String(input.text ?? ""));
+    case "calculate_loan":
+      return calculateLoan(Number(input.principal ?? 0), Number(input.annualRatePct ?? 0), Number(input.years ?? 0));
+    case "convert_currency":
+      return convertCurrency(Number(input.amount ?? 0), String(input.from ?? ""), String(input.to ?? ""));
+    case "log_expense":
+      return logExpense(Number(input.amount ?? 0), String(input.category ?? ""), input.note ? String(input.note) : undefined);
+    case "expense_summary":
+      return expenseSummary(input.days ? Number(input.days) : 30);
+    case "log_workout":
+      return logWorkout(
+        String(input.description ?? ""),
+        input.durationMin ? Number(input.durationMin) : undefined,
+        input.notes ? String(input.notes) : undefined,
+      );
+    case "log_meal":
+      return logMeal(
+        String(input.description ?? ""),
+        input.calories ? Number(input.calories) : undefined,
+        input.notes ? String(input.notes) : undefined,
+      );
+    case "fitness_summary":
+      return fitnessSummary(input.days ? Number(input.days) : 7);
+    case "calculate_bmi":
+      return calculateBmi(Number(input.heightCm ?? 0), Number(input.weightKg ?? 0));
+    case "calculate_calorie_target":
+      return calculateCalorieTarget(
+        input.sex === "female" ? "female" : "male",
+        Number(input.ageYears ?? 0),
+        Number(input.heightCm ?? 0),
+        Number(input.weightKg ?? 0),
+        String(input.activityLevel ?? "light"),
+      );
     case "call_health_report":
       return placeHealthReportCall();
     case "spotify_play":
