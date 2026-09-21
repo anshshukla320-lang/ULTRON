@@ -8,23 +8,20 @@ const TWILIO_WEBHOOK_PATHS = ["/api/call/twiml", "/api/call/gather"];
 // Must stay reachable so a logged-out visitor can actually log in.
 const AUTH_PATHS = ["/login", "/api/auth/login"];
 
-function isLocalHost(hostHeader: string): boolean {
+// Only this exact machine — not the rest of the LAN. A roommate, a guest,
+// or a compromised device on the same WiFi is a real threat model too, not
+// just the open internet, so they get the same login gate as anyone remote.
+function isLoopback(hostHeader: string): boolean {
   const host = hostHeader.split(":")[0];
-  return (
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "::1" ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-  );
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 export async function proxy(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
-  // At home, on this PC or its own LAN, Ultron is trusted with no login —
-  // same as before. The password gate only applies to the public tunnel.
-  if (isLocalHost(host)) return NextResponse.next();
+  // Only the PC Ultron itself runs on is trusted with no login. Everything
+  // else — other devices on the LAN, and the public tunnel — needs the
+  // password gate below.
+  if (isLoopback(host)) return NextResponse.next();
 
   const path = req.nextUrl.pathname;
   if (TWILIO_WEBHOOK_PATHS.some((p) => path.startsWith(p))) return NextResponse.next();
