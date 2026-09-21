@@ -1,4 +1,5 @@
 import { openUrl, playMusic as braveFallbackSearch } from "./systemActions";
+import { getAccessToken } from "./googleAuth";
 
 interface YouTubeVideo {
   videoId: string;
@@ -41,4 +42,33 @@ export async function playVideo(query: string): Promise<string> {
   await openUrl(`https://www.youtube.com/watch?v=${video.videoId}&autoplay=1`);
   const who = video.channel ? ` by ${video.channel}` : "";
   return `Playing "${video.title}"${who} on YouTube. If your browser blocks autoplay on the first try, one click on the video starts it.`;
+}
+
+interface LikedVideoItem {
+  snippet?: { title?: string; channelTitle?: string };
+}
+
+/** The YouTube Data API has no watch-history endpoint (Google deprecated it
+ *  in 2016 for privacy reasons) — "liked" is the closest thing it actually
+ *  exposes, via the authenticated user's own rating on videos.list. */
+export async function getLikedVideos(maxResults = 10): Promise<string> {
+  const token = await getAccessToken();
+  const params = new URLSearchParams({
+    part: "snippet",
+    myRating: "like",
+    maxResults: String(Math.min(maxResults, 50)),
+  });
+  const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(`YouTube liked-videos request failed (${res.status}): ${await res.text()}`);
+  }
+  const data = (await res.json()) as { items?: LikedVideoItem[] };
+  const items = data.items ?? [];
+  if (items.length === 0) return "No liked videos found.";
+
+  return items
+    .map((v, i) => `${i + 1}. ${v.snippet?.title ?? "(untitled)"} — ${v.snippet?.channelTitle ?? "unknown channel"}`)
+    .join("\n");
 }

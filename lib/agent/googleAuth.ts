@@ -2,11 +2,24 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Stored outside the agent's file-tool workspace on purpose: read_file /
-// list_files / search_files are scoped to WORKSPACE_ROOT and must never be
-// able to reach this token, however the request was phrased.
+// Unified Google connection — one OAuth flow, one token, covering every
+// Google service ULTRON can touch (Gmail, YouTube, Calendar, Drive,
+// Contacts, Tasks, Photos). Stored outside the agent's file-tool workspace
+// on purpose: read_file/list_files/search_files are scoped to
+// WORKSPACE_ROOT and must never be able to reach this token.
 const CONFIG_DIR = path.join(os.homedir(), ".ultron");
-const TOKEN_PATH = path.join(CONFIG_DIR, "gmail-token.json");
+const TOKEN_PATH = path.join(CONFIG_DIR, "google-token.json");
+
+const SCOPES = [
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/youtube.readonly",
+  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/contacts.readonly",
+  "https://www.googleapis.com/auth/tasks",
+  "https://www.googleapis.com/auth/photoslibrary.readonly",
+];
 
 interface StoredToken {
   refresh_token: string;
@@ -28,11 +41,11 @@ async function writeToken(token: StoredToken): Promise<void> {
   await fs.writeFile(TOKEN_PATH, JSON.stringify(token, null, 2), "utf-8");
 }
 
-export async function isGmailConnected(): Promise<boolean> {
+export async function isGoogleConnected(): Promise<boolean> {
   return (await readToken()) !== null;
 }
 
-export async function disconnectGmail(): Promise<void> {
+export async function disconnectGoogle(): Promise<void> {
   try {
     await fs.unlink(TOKEN_PATH);
   } catch {
@@ -58,7 +71,7 @@ export function buildGoogleAuthUrl(): string {
     response_type: "code",
     access_type: "offline",
     prompt: "consent",
-    scope: ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"].join(" "),
+    scope: SCOPES.join(" "),
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
@@ -93,7 +106,7 @@ export async function exchangeCodeForToken(code: string): Promise<void> {
 export async function getAccessToken(): Promise<string> {
   const token = await readToken();
   if (!token) {
-    throw new Error("Gmail isn't connected. Visit /api/gmail/auth in your browser to connect it first.");
+    throw new Error("Google isn't connected. Visit /api/gmail/auth in your browser to connect it first.");
   }
   if (token.access_token && token.expires_at && token.expires_at > Date.now() + 30_000) {
     return token.access_token;
@@ -111,7 +124,7 @@ export async function getAccessToken(): Promise<string> {
     }),
   });
   if (!res.ok) {
-    throw new Error(`Failed to refresh Gmail access token: ${res.status} ${await res.text()}`);
+    throw new Error(`Failed to refresh Google access token: ${res.status} ${await res.text()}`);
   }
   const data = (await res.json()) as { access_token: string; expires_in: number };
   await writeToken({

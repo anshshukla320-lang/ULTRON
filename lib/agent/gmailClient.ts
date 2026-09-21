@@ -1,4 +1,4 @@
-import { getAccessToken } from "./gmailAuth";
+import { getAccessToken } from "./googleAuth";
 
 interface GmailHeader {
   name: string;

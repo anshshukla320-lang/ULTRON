@@ -3,8 +3,15 @@ import * as actions from "./systemActions";
 import * as gmail from "./gmailClient";
 import { placeHealthReportCall } from "./callReport";
 import * as spotify from "./spotifyClient";
-import { playVideo } from "./youtubeClient";
+import { playVideo, getLikedVideos } from "./youtubeClient";
+import { getRecentWatchHistory } from "./youtubeHistory";
 import { rememberFact, forgetFact } from "./memory";
+import * as calendar from "./calendarClient";
+import * as drive from "./driveClient";
+import * as contacts from "./contactsClient";
+import * as tasks from "./tasksClient";
+import { listRecentPhotos } from "./photosClient";
+import { getRecentLocationHistory } from "./locationHistory";
 
 export type ToolName =
   | "open_app"
@@ -28,7 +35,19 @@ export type ToolName =
   | "spotify_next"
   | "spotify_previous"
   | "remember"
-  | "forget";
+  | "forget"
+  | "youtube_liked_videos"
+  | "youtube_watch_history"
+  | "list_calendar_events"
+  | "create_calendar_event"
+  | "drive_search_files"
+  | "drive_read_file"
+  | "search_contacts"
+  | "list_tasks"
+  | "create_task"
+  | "complete_task"
+  | "list_recent_photos"
+  | "location_history";
 
 /** Tools in here run immediately. Anything not listed requires the user to
  *  click "Confirm" in the UI before it executes. */
@@ -51,6 +70,18 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "spotify_previous",
   "remember",
   "forget",
+  "youtube_liked_videos",
+  "youtube_watch_history",
+  "list_calendar_events",
+  "create_calendar_event",
+  "drive_search_files",
+  "drive_read_file",
+  "search_contacts",
+  "list_tasks",
+  "create_task",
+  "complete_task",
+  "list_recent_photos",
+  "location_history",
 ]);
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -259,6 +290,133 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "youtube_liked_videos",
+    description:
+      "List the user's liked videos on YouTube (requires YouTube connected via /api/youtube/auth). This is the closest thing the YouTube API actually exposes to \"what have I watched\" — Google removed API access to real watch history in 2016.",
+    input_schema: {
+      type: "object",
+      properties: { maxResults: { type: "number", description: "Max videos to return, default 10, max 50" } },
+      required: [],
+    },
+  },
+  {
+    name: "youtube_watch_history",
+    description:
+      "Read the user's real YouTube watch history from a Google Takeout export (watch-history.json) if one has been placed in the agent's sandboxed workspace folder. There's no live API for this. If none is found, the tool explains how to export one.",
+    input_schema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Max recent entries to return, default 10" } },
+      required: [],
+    },
+  },
+  {
+    name: "list_calendar_events",
+    description: "List the user's upcoming Google Calendar events, soonest first.",
+    input_schema: {
+      type: "object",
+      properties: { maxResults: { type: "number", description: "Max events to return, default 10, max 50" } },
+      required: [],
+    },
+  },
+  {
+    name: "create_calendar_event",
+    description: "Create an event on the user's primary Google Calendar. No attendees/invites — a personal event only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        summary: { type: "string", description: "Event title" },
+        startISO: { type: "string", description: "Start time as an ISO 8601 datetime with timezone offset, e.g. 2025-06-01T14:00:00-07:00" },
+        endISO: { type: "string", description: "End time, same format" },
+        description: { type: "string", description: "Optional event notes" },
+      },
+      required: ["summary", "startISO", "endISO"],
+    },
+  },
+  {
+    name: "drive_search_files",
+    description: "Search the user's Google Drive by filename.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text to search for in file names" },
+        maxResults: { type: "number", description: "Max files to return, default 10, max 50" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "drive_read_file",
+    description: "Read the text content of a Google Drive file by its id (from drive_search_files). Google Docs/Sheets/Slides are exported to plain text/CSV automatically; other file types are read directly if they're text, up to 100KB.",
+    input_schema: {
+      type: "object",
+      properties: { fileId: { type: "string", description: "Drive file id" } },
+      required: ["fileId"],
+    },
+  },
+  {
+    name: "search_contacts",
+    description: "Search the user's Google Contacts by name, email, or phone number.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text to search for" },
+        maxResults: { type: "number", description: "Max contacts to return, default 10" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "list_tasks",
+    description: "List the user's open (incomplete) Google Tasks from their default task list.",
+    input_schema: {
+      type: "object",
+      properties: { maxResults: { type: "number", description: "Max tasks to return, default 20, max 100" } },
+      required: [],
+    },
+  },
+  {
+    name: "create_task",
+    description: "Add a task to the user's default Google Tasks list.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Task title" },
+        notes: { type: "string", description: "Optional task notes" },
+        due: { type: "string", description: "Optional due date, RFC 3339 date, e.g. 2025-06-01T00:00:00.000Z" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "complete_task",
+    description: "Mark a Google Task as completed by its id (from list_tasks).",
+    input_schema: {
+      type: "object",
+      properties: { taskId: { type: "string", description: "Task id" } },
+      required: ["taskId"],
+    },
+  },
+  {
+    name: "list_recent_photos",
+    description:
+      "List recent Google Photos media items. Since March 2025 Google restricts third-party apps to only photos the app itself uploaded, so this will almost always come back empty — that's a platform-wide restriction on every third-party app, not something specific to ULTRON. Tell the user this plainly rather than implying their library is empty.",
+    input_schema: {
+      type: "object",
+      properties: { maxResults: { type: "number", description: "Max items to return, default 10" } },
+      required: [],
+    },
+  },
+  {
+    name: "location_history",
+    description:
+      "Read the user's Google Maps location/Timeline history from a Google Takeout export placed in the agent's sandboxed workspace folder. There is no live API for this at all — Google removed third-party access entirely and moved Timeline to on-device-only storage in late 2024. If no export is found, the tool explains how (or whether) one can still be obtained.",
+    input_schema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Max recent places to return, default 10" } },
+      required: [],
+    },
+  },
+  {
     name: "call_health_report",
     description:
       "Place a real phone call (via Twilio) to the user's phone number and read out a spoken summary of this PC's health — disk space, memory, CPU load, and recent system errors — plus any important unread Gmail messages. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and USER_PHONE_NUMBER to be set in .env.local. This places a real, billed phone call, so it always requires the user's explicit confirmation before it runs.",
@@ -302,6 +460,35 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
       return rememberFact(String(input.fact ?? ""));
     case "forget":
       return forgetFact(String(input.query ?? ""));
+    case "youtube_liked_videos":
+      return getLikedVideos(input.maxResults ? Number(input.maxResults) : 10);
+    case "youtube_watch_history":
+      return getRecentWatchHistory(input.limit ? Number(input.limit) : 10);
+    case "list_calendar_events":
+      return calendar.listUpcomingEvents(input.maxResults ? Number(input.maxResults) : 10);
+    case "create_calendar_event":
+      return calendar.createEvent(
+        String(input.summary ?? ""),
+        String(input.startISO ?? ""),
+        String(input.endISO ?? ""),
+        input.description ? String(input.description) : undefined,
+      );
+    case "drive_search_files":
+      return drive.searchFiles(String(input.query ?? ""), input.maxResults ? Number(input.maxResults) : 10);
+    case "drive_read_file":
+      return drive.readFile(String(input.fileId ?? ""));
+    case "search_contacts":
+      return contacts.searchContacts(String(input.query ?? ""), input.maxResults ? Number(input.maxResults) : 10);
+    case "list_tasks":
+      return tasks.listTasks(input.maxResults ? Number(input.maxResults) : 20);
+    case "create_task":
+      return tasks.createTask(String(input.title ?? ""), input.notes ? String(input.notes) : undefined, input.due ? String(input.due) : undefined);
+    case "complete_task":
+      return tasks.completeTask(String(input.taskId ?? ""));
+    case "list_recent_photos":
+      return listRecentPhotos(input.maxResults ? Number(input.maxResults) : 10);
+    case "location_history":
+      return getRecentLocationHistory(input.limit ? Number(input.limit) : 10);
     case "call_health_report":
       return placeHealthReportCall();
     case "spotify_play":

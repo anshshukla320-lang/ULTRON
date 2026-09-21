@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { exchangeCodeForToken } from "@/lib/agent/gmailAuth";
+import { exchangeCodeForToken } from "@/lib/agent/googleAuth";
 
 function page(title: string, body: string) {
   return new NextResponse(
@@ -28,7 +28,10 @@ export async function GET(req: Request) {
 
   try {
     await exchangeCodeForToken(code);
-    return page("Gmail — connected", `<p>Gmail connected. ULTRON can now read and (with your confirmation) send email.</p><p><a href="/">Back to ULTRON</a></p>`);
+    return page(
+      "Google — connected",
+      `<p>Google connected. ULTRON can now read/send Gmail, and read YouTube likes, Calendar, Drive, Contacts, Tasks, and Photos.</p><p><a href="/">Back to ULTRON</a></p>`,
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return page("Gmail — error", `<p>${msg}</p><p><a href="/api/gmail/auth">Try again</a></p>`);
