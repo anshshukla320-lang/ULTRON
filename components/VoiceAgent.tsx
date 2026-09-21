@@ -11,15 +11,9 @@ interface ToolUseRef {
   input: Record<string, unknown>;
 }
 
-interface ReadyResult {
-  id: string;
-  output: string;
-  isError?: boolean;
-}
-
 interface PendingConfirmation {
+  token: string;
   toolUse: ToolUseRef[];
-  readyResults: ReadyResult[];
 }
 
 interface ActionLogEntry {
@@ -36,6 +30,10 @@ interface LogEntry {
 }
 
 let nextLogId = 1;
+
+// How long ULTRON keeps listening for a follow-up after it finishes
+// replying, before requiring the wake word again.
+const FOLLOW_UP_WINDOW_MS = 8000;
 
 // Tolerant of common mis-hearings ("hey ultron" -> "hey altron", or "hey"
 // getting dropped entirely by the recognizer). Returns whatever came after
@@ -70,6 +68,9 @@ export default function VoiceAgent() {
   // Set synchronously the instant mic permission is denied, so onend can't
   // race the React state update and fire one more restart-retry loop.
   const unsupportedRef = useRef(false);
+  // Pending "revert to wake mode" timer for the post-reply follow-up
+  // window — cleared the instant a follow-up utterance actually arrives.
+  const followUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     statusRef.current = status;
@@ -94,6 +95,29 @@ export default function VoiceAgent() {
     }
   }, []);
 
+  const clearFollowUpTimer = useCallback(() => {
+    if (followUpTimerRef.current) {
+      clearTimeout(followUpTimerRef.current);
+      followUpTimerRef.current = null;
+    }
+  }, []);
+
+  // After ULTRON replies, stay in "listening for a follow-up" mode instead
+  // of immediately requiring "hey ultron" again — matches the phone call's
+  // conversation loop. Reverts to wake mode on its own if nothing is said
+  // within the window.
+  const armFollowUpWindow = useCallback(() => {
+    clearFollowUpTimer();
+    wakeModeRef.current = false;
+    setStatus("listening");
+    resumeListening();
+    followUpTimerRef.current = setTimeout(() => {
+      followUpTimerRef.current = null;
+      wakeModeRef.current = true;
+      setStatus("wake");
+    }, FOLLOW_UP_WINDOW_MS);
+  }, [clearFollowUpTimer, resumeListening]);
+
   // Browser TTS as a last resort — robotic, but keeps the assistant from
   // going silent if ElevenLabs isn't configured or the request fails.
   const speakFallback = useCallback(
@@ -108,13 +132,12 @@ export default function VoiceAgent() {
       utter.rate = 1.02;
       utter.pitch = 0.85;
       utter.onend = () => {
-        setStatus("wake");
-        resumeListening();
+        armFollowUpWindow();
       };
       setStatus("speaking");
       window.speechSynthesis.speak(utter);
     },
-    [resumeListening],
+    [resumeListening, armFollowUpWindow],
   );
 
   const speak = useCallback(
@@ -133,8 +156,7 @@ export default function VoiceAgent() {
         const audio = new Audio(url);
         audio.onended = () => {
           URL.revokeObjectURL(url);
-          setStatus("wake");
-          resumeListening();
+          armFollowUpWindow();
         };
         audio.onerror = () => {
           URL.revokeObjectURL(url);
@@ -145,7 +167,7 @@ export default function VoiceAgent() {
         speakFallback(text);
       }
     },
-    [resumeListening, speakFallback],
+    [speakFallback, armFollowUpWindow],
   );
 
   const describeAction = (a: ActionLogEntry) => {
@@ -156,7 +178,7 @@ export default function VoiceAgent() {
   };
 
   const callAgent = useCallback(
-    async (resolution?: { toolUse: ToolUseRef[]; readyResults: ReadyResult[]; approved: boolean }) => {
+    async (resolution?: { token: string; approved: boolean }) => {
       setStatus("thinking");
       try {
         const res = await fetch("/api/agent", {
@@ -263,6 +285,7 @@ export default function VoiceAgent() {
           setStatus("listening");
         }
       } else {
+        clearFollowUpTimer();
         wakeModeRef.current = true;
         handleUtterance(finalText);
       }
@@ -305,7 +328,7 @@ export default function VoiceAgent() {
       recognition.onend = null;
       recognition.abort();
     };
-  }, [handleUtterance, pushLog]);
+  }, [handleUtterance, pushLog, clearFollowUpTimer]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -317,11 +340,14 @@ export default function VoiceAgent() {
     if (mutedRef.current) {
       mutedRef.current = false;
       setMuted(false);
+      clearFollowUpTimer();
+      wakeModeRef.current = true;
       setStatus("wake");
       resumeListening();
     } else {
       mutedRef.current = true;
       setMuted(true);
+      clearFollowUpTimer();
       window.speechSynthesis?.cancel();
       try {
         recognition.stop();
@@ -329,7 +355,7 @@ export default function VoiceAgent() {
         // ignore
       }
     }
-  }, [resumeListening]);
+  }, [resumeListening, clearFollowUpTimer]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -346,7 +372,7 @@ export default function VoiceAgent() {
     (approved: boolean) => {
       if (!pending) return;
       setStatus("thinking");
-      void callAgent({ ...pending, approved });
+      void callAgent({ token: pending.token, approved });
     },
     [pending, callAgent],
   );

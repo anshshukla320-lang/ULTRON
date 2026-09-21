@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { AUTO_EXECUTE, TOOLS, executeTool, type ToolName } from "@/lib/agent/tools";
 import { recallMemoryForPrompt } from "@/lib/agent/memory";
+import { stashPendingAction, takePendingAction } from "@/lib/agent/pendingActions";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,8 @@ If the user asks you to call them, check in on their machine, or report any issu
 For anything you'd need current information to answer (news, facts, prices, "what is", "who is", etc.), use web_search and answer from the results yourself — don't just guess from memory. Use open_search when the user wants to browse results themselves (e.g. "search for cat videos on youtube", "look up X on google").
 When the user asks to play a song, artist, or music, prefer spotify_play — it actually starts playback on their Spotify app instead of just opening a page. Only fall back to play_video (opens YouTube in the browser with autoplay) if spotify_play errors (not connected, no Premium, etc.) — mention why you fell back. Use spotify_pause/spotify_next/spotify_previous for playback control once something's playing.
 For anything that isn't music — a trailer, a tutorial, highlights, "open and play the video about X" — use play_video directly; it finds the specific YouTube video and opens it with autoplay, no need to search first.
+If asked about YouTube watch history, be upfront that Google removed API access to real watch history in 2016 — no app can fetch it live, not just this one. Use youtube_liked_videos for what the API actually exposes (their liked videos), and youtube_watch_history in case they've dropped a Google Takeout export into the workspace — if neither has what they need, tell them plainly rather than guessing.
+You have broad access to the user's Google account: Calendar (list/create events), Drive (search/read files), Contacts (search), and Tasks (list/create/complete) all work live. Google Photos is real but nearly useless — since March 2025 third-party apps can only see photos they themselves uploaded, so list_recent_photos will almost always come back empty; say so plainly rather than implying their library is empty. Location history has no API at all (Google shut it down, then moved Timeline to on-device-only storage in late 2024) — location_history only works if the user has dropped a Takeout export into the workspace. If any Google tool errors saying it isn't connected, tell the user to visit /api/gmail/auth in their browser to connect their whole Google account (one connection covers Gmail, YouTube, Calendar, Drive, Contacts, Tasks, and Photos).
 You have long-term memory via the remember/forget tools. When you learn something genuinely worth carrying into future conversations — a preference the user states, a recurring detail about their setup or life, a durable fact worth keeping from a web search — save it with remember, in your own concise words. Don't remember trivial one-off command results or anything time-sensitive (weather, a stock price, "today"). Use forget when the user corrects something you got wrong or says a remembered fact is outdated. This is how you actually get sharper over time instead of starting fresh every conversation.
 After a tool result comes back, briefly tell the user what happened in one short sentence. If a tool errors, say so plainly and suggest a fix.
 If a request is ambiguous, make a reasonable assumption and say what you assumed rather than stopping to ask.`;
@@ -24,12 +27,6 @@ If a request is ambiguous, make a reasonable assumption and say what you assumed
 function buildSystemPrompt(memoryNotes: string): string {
   if (!memoryNotes) return SYSTEM_PROMPT_BASE;
   return `${SYSTEM_PROMPT_BASE}\n\nThings you've learned and remembered from earlier conversations (use naturally where relevant — don't recite this list or mention that you're consulting memory):\n${memoryNotes}`;
-}
-
-interface ToolUseRef {
-  id: string;
-  name: ToolName;
-  input: Record<string, unknown>;
 }
 
 interface ReadyResult {
@@ -71,51 +68,58 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json();
-  const messages: Anthropic.MessageParam[] = Array.isArray(body?.messages) ? body.messages : [];
-  const resolution: {
-    toolUse: ToolUseRef[];
-    readyResults: ReadyResult[];
-    approved: boolean;
-  } | null = body?.resolution ?? null;
+  const resolutionInput: { token?: string; approved?: boolean } | null = body?.resolution ?? null;
 
-  if (messages.length === 0) {
-    return NextResponse.json({ error: "messages must be a non-empty array." }, { status: 400 });
+  const actionsLog: ActionLogEntry[] = [];
+  let working: Anthropic.MessageParam[];
+
+  if (resolutionInput?.token) {
+    // The client only ever sends back a token + approved/declined — never
+    // the tool name/input themselves, so it can't get anything executed
+    // beyond exactly what the server proposed and stashed earlier.
+    const stashed = takePendingAction(resolutionInput.token);
+    if (!stashed) {
+      return NextResponse.json({ error: "That confirmation has expired or was already used — ask again." }, { status: 400 });
+    }
+
+    working = [...stashed.messages];
+    const blocks: Anthropic.ToolResultBlockParam[] = stashed.readyResults.map(toolResultBlock);
+
+    for (const tu of stashed.toolUse) {
+      if (!resolutionInput.approved) {
+        blocks.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: "The user declined to run this action.",
+          is_error: true,
+        });
+        actionsLog.push({ name: tu.name, input: tu.input, status: "declined" });
+        continue;
+      }
+      try {
+        const output = await executeTool(tu.name as ToolName, tu.input);
+        blocks.push({ type: "tool_result", tool_use_id: tu.id, content: output });
+        actionsLog.push({ name: tu.name, input: tu.input, output, status: "done" });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        blocks.push({ type: "tool_result", tool_use_id: tu.id, content: msg, is_error: true });
+        actionsLog.push({ name: tu.name, input: tu.input, output: msg, status: "error" });
+      }
+    }
+
+    working.push({ role: "user", content: blocks });
+  } else {
+    const messages: Anthropic.MessageParam[] = Array.isArray(body?.messages) ? body.messages : [];
+    if (messages.length === 0) {
+      return NextResponse.json({ error: "messages must be a non-empty array." }, { status: 400 });
+    }
+    working = [...messages];
   }
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const working: Anthropic.MessageParam[] = [...messages];
-  const actionsLog: ActionLogEntry[] = [];
   const systemPrompt = buildSystemPrompt(await recallMemoryForPrompt());
 
   try {
-    if (resolution) {
-      const blocks: Anthropic.ToolResultBlockParam[] = resolution.readyResults.map(toolResultBlock);
-
-      for (const tu of resolution.toolUse) {
-        if (!resolution.approved) {
-          blocks.push({
-            type: "tool_result",
-            tool_use_id: tu.id,
-            content: "The user declined to run this action.",
-            is_error: true,
-          });
-          actionsLog.push({ name: tu.name, input: tu.input, status: "declined" });
-          continue;
-        }
-        try {
-          const output = await executeTool(tu.name, tu.input);
-          blocks.push({ type: "tool_result", tool_use_id: tu.id, content: output });
-          actionsLog.push({ name: tu.name, input: tu.input, output, status: "done" });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          blocks.push({ type: "tool_result", tool_use_id: tu.id, content: msg, is_error: true });
-          actionsLog.push({ name: tu.name, input: tu.input, output: msg, status: "error" });
-        }
-      }
-
-      working.push({ role: "user", content: blocks });
-    }
-
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const response = await anthropic.messages.create({
         model: MODEL,
@@ -156,14 +160,15 @@ export async function POST(req: Request) {
       }
 
       if (confirmBlocks.length > 0) {
+        const toolUse = confirmBlocks.map((b) => ({ id: b.id, name: b.name, input: b.input as Record<string, unknown> }));
+        const token = stashPendingAction({ toolUse, readyResults, messages: working });
         return NextResponse.json({
           messages: working,
           reply: extractText(response.content),
           actions: actionsLog,
-          pending: {
-            toolUse: confirmBlocks.map((b) => ({ id: b.id, name: b.name, input: b.input })),
-            readyResults,
-          },
+          // toolUse here is for the confirm modal to DISPLAY only — actually
+          // executing it requires the token, which only the server can mint.
+          pending: { token, toolUse },
         });
       }
 
