@@ -162,6 +162,18 @@ export default function VoiceAgent() {
   const speakWithBrowser = useCallback((segment: SpeechSegment) => {
     return new Promise<void>((resolve) => {
       if (typeof window === "undefined" || !window.speechSynthesis) return resolve();
+      // Chrome sometimes never fires onend/onerror (no voice installed for
+      // the language, or its ~15s long-utterance bug). Without a cap ULTRON
+      // would sit on "SPEAKING…" with the mic off forever.
+      const words = segment.text.split(/\s+/).length;
+      const watchdog = setTimeout(() => {
+        window.speechSynthesis.cancel();
+        resolve();
+      }, 3000 + words * 600);
+      const done = () => {
+        clearTimeout(watchdog);
+        resolve();
+      };
       const utter = new SpeechSynthesisUtterance(segment.text);
       if (segment.lang) {
         utter.lang = segment.lang;
@@ -169,8 +181,8 @@ export default function VoiceAgent() {
         utter.rate = 1.02;
         utter.pitch = 0.85;
       }
-      utter.onend = () => resolve();
-      utter.onerror = () => resolve();
+      utter.onend = done;
+      utter.onerror = done;
       window.speechSynthesis.speak(utter);
     });
   }, []);
@@ -322,9 +334,15 @@ export default function VoiceAgent() {
           setStatus("listening");
         }
       } else {
+        // In the follow-up window the wake word is optional, but people
+        // still say it — strip it so the model doesn't get "hey ultron ...".
+        // Only a *leading* wake phrase, so "tell me about the movie Ultron"
+        // stays intact.
+        const command = finalText.replace(/^\s*(?:(?:hey|ok)[,]?\s+)?(?:ultron|altron)\b[,.!]?\s*/i, "");
+        if (!command.trim()) return; // just "hey ultron" again — keep listening
         clearFollowUpTimer();
         wakeModeRef.current = true;
-        handleUtterance(finalText);
+        handleUtterance(command);
       }
     };
 

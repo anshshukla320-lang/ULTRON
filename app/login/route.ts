@@ -6,7 +6,7 @@ export async function GET(req: Request) {
   const failed = params.get("error") === "1";
   const next = safeNextPath(params.get("next"));
   return new NextResponse(
-    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ULTRON — sign in</title>
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ULTRON — sign in</title><link rel="icon" href="/icon.svg" type="image/svg+xml">
     <style>
       body{background:#000;color:#ffaa30;font-family:"Courier New",monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:24px}
       .box{border:1px solid rgba(255,170,48,.45);border-radius:6px;padding:28px;max-width:360px;width:100%;background:rgba(20,10,0,.5)}
