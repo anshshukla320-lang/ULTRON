@@ -336,6 +336,12 @@ body {
   word-break: break-word;
 }
 
+.confirm-code {
+  font-family: inherit;
+  white-space: pre-wrap;
+  max-height: 180px;
+}
+
 .confirm-row {
   display: flex;
   gap: 8px;

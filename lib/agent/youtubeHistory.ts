@@ -54,7 +54,9 @@ export async function getRecentWatchHistory(limit = 10): Promise<string> {
     );
   }
 
-  const raw = await fs.readFile(filePath, "utf-8");
+  // filePath is found at runtime inside the user's workspace, not the repo —
+  // tell the bundler not to trace (and ship) the whole project for it.
+  const raw = await fs.readFile(/*turbopackIgnore: true*/ filePath, "utf-8");
   let entries: TakeoutEntry[];
   try {
     const parsed = JSON.parse(raw);

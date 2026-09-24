@@ -64,13 +64,22 @@ async function fetchSegmentAudio(segment: SpeechSegment): Promise<Blob | null> {
   }
 }
 
+// The clip currently playing, so muting can cut it off mid-sentence.
+let currentAudio: HTMLAudioElement | null = null;
+
 function playBlob(blob: Blob): Promise<boolean> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
+    currentAudio = audio;
     const finish = (ok: boolean) => {
+      if (currentAudio === audio) currentAudio = null;
       URL.revokeObjectURL(url);
       resolve(ok);
+    };
+    // pause() fires no "ended" event; treat it as done so speak() moves on.
+    audio.onpause = () => {
+      if (!audio.ended) finish(true);
     };
     audio.onended = () => finish(true);
     audio.onerror = () => finish(false);
@@ -172,14 +181,21 @@ export default function VoiceAgent() {
   const speak = useCallback(
     async (text: string) => {
       const segments = parseSpeechSegments(text);
-      if (segments.length === 0) return;
+      // Nothing speakable (e.g. a reply that's only punctuation) — still has
+      // to leave "thinking", or the mic never comes back on.
+      if (segments.length === 0) {
+        armFollowUpWindow();
+        return;
+      }
       setStatus("speaking");
       window.speechSynthesis?.cancel();
       const audioRequests = segments.map(fetchSegmentAudio);
       for (let i = 0; i < segments.length; i++) {
+        if (mutedRef.current) break;
         const blob = await audioRequests[i];
+        if (mutedRef.current) break;
         const played = blob ? await playBlob(blob) : false;
-        if (!played) await speakWithBrowser(segments[i]);
+        if (!played && !mutedRef.current) await speakWithBrowser(segments[i]);
       }
       armFollowUpWindow();
     },
@@ -204,6 +220,10 @@ export default function VoiceAgent() {
         });
         const data = await res.json();
         if (!res.ok) {
+          // A failed confirm (expired/used token) must not leave the modal
+          // up with a dead token. The server fills in the unanswered tool
+          // call on the next message, so the conversation carries on.
+          if (resolution) setPending(null);
           pushLog("error", data.error ?? "Agent request failed.");
           setStatus("wake");
           resumeListening();
@@ -231,6 +251,7 @@ export default function VoiceAgent() {
           resumeListening();
         }
       } catch (err) {
+        if (resolution) setPending(null);
         pushLog("error", err instanceof Error ? err.message : String(err));
         setStatus("wake");
         resumeListening();
@@ -365,6 +386,7 @@ export default function VoiceAgent() {
       setMuted(true);
       clearFollowUpTimer();
       window.speechSynthesis?.cancel();
+      currentAudio?.pause();
       try {
         recognition.stop();
       } catch {
@@ -430,6 +452,14 @@ export default function VoiceAgent() {
                 {typeof t.input.path === "string" ? ` → ${t.input.path}` : ""}
                 {typeof t.input.id === "string" ? ` → ${t.input.id}` : ""}
               </div>
+              {/* run_code executes with the user's full permissions — never
+                  ask them to approve code they can't see. */}
+              {typeof t.input.code === "string" && (
+                <pre className="confirm-detail confirm-code">
+                  {typeof t.input.language === "string" ? `${t.input.language}:\n` : ""}
+                  {t.input.code}
+                </pre>
+              )}
               {typeof t.input.to === "string" && (
                 <div className="confirm-detail">
                   To: {t.input.to}

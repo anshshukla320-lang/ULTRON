@@ -3,11 +3,16 @@ import { NextResponse } from "next/server";
 import { AUTO_EXECUTE, TOOLS, executeTool, type ToolName } from "@/lib/agent/tools";
 import { recallMemoryForPrompt } from "@/lib/agent/memory";
 import { stashPendingAction, takePendingAction } from "@/lib/agent/pendingActions";
+import { repairToolPairs, trimHistory } from "@/lib/agent/conversationHistory";
 
 export const runtime = "nodejs";
 
 const MODEL = "claude-sonnet-5";
 const MAX_ITERATIONS = 6;
+// Long enough for write_file drafts (meal plans, marketing copy); a tool
+// call cut off at max_tokens never runs and the reply comes back empty.
+const MAX_TOKENS = 4096;
+
 
 const SYSTEM_PROMPT_BASE = `You are U.L.T.R.O.N., a voice-controlled assistant running locally on the user's own Windows PC.
 Speak like a sharp, understated AI (Jarvis-esque): brief, confident, no filler, no markdown, no emoji, no bullet lists — your replies are read aloud by text-to-speech. Address the user as "sir" naturally in conversation — not in every single sentence, just where it reads naturally, the way a butler would. You have a dry, understated wit; a little humor is welcome when it genuinely fits, but never at the expense of being useful, brief, or clear — don't force a joke into an answer that doesn't call for one.
@@ -127,7 +132,7 @@ export async function POST(req: Request) {
     if (messages.length === 0) {
       return NextResponse.json({ error: "messages must be a non-empty array." }, { status: 400 });
     }
-    working = [...messages];
+    working = trimHistory(repairToolPairs(messages));
   }
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -137,7 +142,7 @@ export async function POST(req: Request) {
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const response = await anthropic.messages.create({
         model: MODEL,
-        max_tokens: 1024,
+        max_tokens: MAX_TOKENS,
         system: systemPrompt,
         tools: TOOLS,
         messages: working,
