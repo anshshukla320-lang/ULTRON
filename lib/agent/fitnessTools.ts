@@ -29,6 +29,7 @@ async function writeLog(entries: FitnessEntry[]): Promise<void> {
 }
 
 export async function logWorkout(description: string, durationMin?: number, notes?: string): Promise<string> {
+  if (!description.trim()) throw new Error("Describe the workout, e.g. '5k run'.");
   const entries = await readLog();
   entries.push({ type: "workout", description, value: durationMin, notes, loggedAt: new Date().toISOString() });
   await writeLog(entries);
@@ -36,6 +37,7 @@ export async function logWorkout(description: string, durationMin?: number, note
 }
 
 export async function logMeal(description: string, calories?: number, notes?: string): Promise<string> {
+  if (!description.trim()) throw new Error("Describe the meal.");
   const entries = await readLog();
   entries.push({ type: "meal", description, value: calories, notes, loggedAt: new Date().toISOString() });
   await writeLog(entries);
@@ -55,10 +57,25 @@ export async function fitnessSummary(days = 7): Promise<string> {
   return `Last ${days} days: ${workouts.length} workout(s) totaling ${totalMin} min; ${meals.length} meal(s) logged totaling ${totalCal} kcal.`;
 }
 
+// Catches unit mix-ups (1.8 meaning metres, or pounds/inches) before they
+// produce a confident-sounding nonsense number.
+function checkBody(heightCm: number, weightKg: number): void {
+  if (!Number.isFinite(heightCm) || !Number.isFinite(weightKg) || heightCm <= 0 || weightKg <= 0) {
+    throw new Error("height and weight must be positive numbers.");
+  }
+  if (heightCm < 3) throw new Error(`Height ${heightCm} looks like metres — pass centimetres (e.g. ${Math.round(heightCm * 100)}).`);
+  if (heightCm < 50 || heightCm > 272) throw new Error(`Height ${heightCm} cm is out of range — convert feet/inches to centimetres first.`);
+  if (weightKg < 2 || weightKg > 650) throw new Error(`Weight ${weightKg} kg is out of range — convert pounds to kilograms first.`);
+}
+
 export function calculateBmi(heightCm: number, weightKg: number): string {
-  if (heightCm <= 0 || weightKg <= 0) throw new Error("height and weight must be positive.");
+  checkBody(heightCm, weightKg);
   const heightM = heightCm / 100;
   const bmi = weightKg / (heightM * heightM);
+  // Each value can be in range on its own yet be inches/pounds together.
+  if (bmi < 8 || bmi > 100) {
+    throw new Error(`That gives a BMI of ${bmi.toFixed(0)}, which isn't humanly possible — check the units (centimetres and kilograms).`);
+  }
   let category: string;
   if (bmi < 18.5) category = "underweight";
   else if (bmi < 25) category = "normal";
@@ -75,6 +92,17 @@ const ACTIVITY_MULTIPLIERS: Record<string, number> = {
   "very active": 1.9,
 };
 
+function activityKey(level: string): string {
+  const k = level.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  const aliases: Record<string, string> = {
+    "lightly active": "light",
+    "moderately active": "moderate",
+    "extra active": "very active",
+    "extremely active": "very active",
+  };
+  return aliases[k] ?? k;
+}
+
 export function calculateCalorieTarget(
   sex: "male" | "female",
   ageYears: number,
@@ -82,14 +110,19 @@ export function calculateCalorieTarget(
   weightKg: number,
   activityLevel: string,
 ): string {
-  if (ageYears <= 0 || heightCm <= 0 || weightKg <= 0) throw new Error("age, height, and weight must be positive.");
+  if (!Number.isFinite(ageYears) || ageYears <= 0) throw new Error("age must be a positive number.");
+  checkBody(heightCm, weightKg);
+  const key = activityKey(activityLevel);
+  const mult = ACTIVITY_MULTIPLIERS[key];
+  if (mult === undefined) {
+    throw new Error(`Unknown activity level "${activityLevel}". Use one of: ${Object.keys(ACTIVITY_MULTIPLIERS).join(", ")}.`);
+  }
   // Mifflin-St Jeor equation
   const bmr =
     sex === "male" ? 10 * weightKg + 6.25 * heightCm - 5 * ageYears + 5 : 10 * weightKg + 6.25 * heightCm - 5 * ageYears - 161;
-  const mult = ACTIVITY_MULTIPLIERS[activityLevel.trim().toLowerCase()] ?? 1.375;
   const maintenance = bmr * mult;
   return (
-    `Estimated BMR: ${Math.round(bmr)} kcal/day. Maintenance calories (${activityLevel}): ~${Math.round(maintenance)} kcal/day. ` +
+    `Estimated BMR: ${Math.round(bmr)} kcal/day. Maintenance calories (${key}): ~${Math.round(maintenance)} kcal/day. ` +
     `Common targets: ~500 kcal/day below maintenance for gradual weight loss, ~300-500 above for gain. ` +
     `General estimate based on standard formulas, not medical advice — consult a professional for personalized guidance.`
   );

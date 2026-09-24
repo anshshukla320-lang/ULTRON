@@ -30,9 +30,10 @@ async function writeLedger(entries: ExpenseEntry[]): Promise<void> {
 export async function logExpense(amount: number, category: string, note?: string): Promise<string> {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount must be a positive number.");
   const entries = await readLedger();
-  entries.push({ amount, category: category.trim() || "uncategorized", note, loggedAt: new Date().toISOString() });
+  const cat = category.trim() || "uncategorized";
+  entries.push({ amount, category: cat, note, loggedAt: new Date().toISOString() });
   await writeLedger(entries);
-  return `Logged $${amount.toFixed(2)} under "${category}".`;
+  return `Logged $${amount.toFixed(2)} under "${cat}".`;
 }
 
 export async function expenseSummary(days = 30): Promise<string> {
@@ -52,7 +53,9 @@ export async function expenseSummary(days = 30): Promise<string> {
 }
 
 export function calculateLoan(principal: number, annualRatePct: number, years: number): string {
+  if (![principal, annualRatePct, years].every(Number.isFinite)) throw new Error("principal, rate, and years must be numbers.");
   if (principal <= 0 || years <= 0) throw new Error("principal and years must be positive.");
+  if (annualRatePct < 0) throw new Error("interest rate can't be negative.");
   const monthlyRate = annualRatePct / 100 / 12;
   const n = years * 12;
   const payment = monthlyRate === 0 ? principal / n : (principal * monthlyRate) / (1 - (1 + monthlyRate) ** -n);

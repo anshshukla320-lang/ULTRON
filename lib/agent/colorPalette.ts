@@ -5,9 +5,10 @@ interface HSL {
 }
 
 function normalizeHex(input: string): string {
-  const hex = input.trim().replace(/^#/, "");
+  let hex = input.trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) hex = hex.replace(/./g, "$&$&"); // "36c" -> "3366cc"
   if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
-    throw new Error(`"${input}" isn't a valid 6-digit hex color, e.g. "#3366ff".`);
+    throw new Error(`"${input}" isn't a valid hex color, e.g. "#3366ff".`);
   }
   return hex;
 }
@@ -89,9 +90,12 @@ export function generatePalette(baseColor: string, scheme: string): string {
   offsets.forEach((offset, i) => {
     const hue = base.h + offset;
     const label = offsets.length === 1 ? "base" : i === 0 ? "primary" : `accent ${i}`;
-    const light = hslToHex({ h: hue, s: Math.max(base.s - 15, 20), l: Math.min(base.l + 30, 92) });
+    // A grey/white/black base has no hue; adding saturation would tint it
+    // red (hue 0), so greys stay neutral.
+    const grey = base.s === 0;
+    const light = hslToHex({ h: hue, s: grey ? 0 : Math.max(base.s - 15, 20), l: Math.max(Math.min(base.l + 30, 92), base.l) });
     const mid = hslToHex({ h: hue, s: base.s, l: base.l });
-    const dark = hslToHex({ h: hue, s: Math.min(base.s + 10, 100), l: Math.max(base.l - 25, 10) });
+    const dark = hslToHex({ h: hue, s: grey ? 0 : Math.min(base.s + 10, 100), l: Math.min(Math.max(base.l - 25, 10), base.l) });
     lines.push(`${label}: ${light} (light) / ${mid} (base) / ${dark} (dark)`);
   });
 

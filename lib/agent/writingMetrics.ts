@@ -7,6 +7,15 @@ function countSyllables(word: string): number {
   return Math.max(count, 1);
 }
 
+// Periods that don't end a sentence ("Dr. Smith", "3 p.m. on Jan. 5").
+const ABBREVIATIONS = /\b(mr|mrs|ms|dr|prof|sr|jr|st|vs|etc|no|fig|approx|e\.g|i\.e|a\.m|p\.m|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\./gi;
+
+// Common irregular past participles — "was thrown", "were written" don't
+// end in -ed, so a plain /\w+ed/ check misses most everyday passives.
+const IRREGULAR_PARTICIPLES =
+  "arisen|awoken|beaten|become|begun|bent|bitten|blown|born|borne|bought|bound|broken|brought|built|burnt|caught|chosen|come|cut|dealt|done|drawn|driven|drunk|dug|eaten|fallen|fed|felt|fought|found|flown|forbidden|forgiven|forgotten|frozen|given|gone|grown|heard|held|hidden|hit|hung|hurt|kept|known|laid|led|left|lent|let|lit|lost|made|meant|met|paid|put|quit|read|ridden|risen|run|said|seen|sent|set|shaken|shot|shown|shut|sold|sought|spent|spoken|spread|stolen|struck|stuck|sung|sunk|swept|sworn|taken|taught|thrown|thought|told|torn|understood|undone|upset|woken|won|worn|written";
+const PASSIVE = new RegExp(`\\b(?:is|are|was|were|be|been|being)\\s+(?:\\w+ly\\s+)?(?:\\w+ed|${IRREGULAR_PARTICIPLES})\\b`, "gi");
+
 /**
  * Gives Claude's writing critique something objective to ground on (like
  * generate_color_palette does for design) — real Flesch reading-ease math,
@@ -16,12 +25,17 @@ export function analyzeWriting(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) throw new Error("No text provided.");
 
-  const sentences = trimmed.split(/[.!?]+(?:\s|$)/).filter((s) => s.trim().length > 0);
+  const sentences = trimmed
+    .replace(ABBREVIATIONS, (m) => m.replace(/\./g, "\u0000"))
+    .split(/[.!?]+(?:\s|$)/)
+    .map((s) => s.replace(/\u0000/g, "."))
+    .filter((s) => s.trim().length > 0);
   const words = trimmed.split(/\s+/).filter(Boolean);
   const syllables = words.reduce((s, w) => s + countSyllables(w), 0);
   const avgWordsPerSentence = sentences.length ? words.length / sentences.length : words.length;
   const avgSyllablesPerWord = words.length ? syllables / words.length : 0;
-  const fleschScore = 206.835 - 1.015 * avgWordsPerSentence - 84.6 * avgSyllablesPerWord;
+  // The raw formula runs past 0-100 on very short or very dense text.
+  const fleschScore = Math.min(100, Math.max(0, 206.835 - 1.015 * avgWordsPerSentence - 84.6 * avgSyllablesPerWord));
 
   let readability: string;
   if (fleschScore >= 90) readability = "very easy (5th grade)";
@@ -31,7 +45,7 @@ export function analyzeWriting(text: string): string {
   else if (fleschScore >= 30) readability = "difficult (college graduate)";
   else readability = "very difficult (professional/academic)";
 
-  const passiveMatches = trimmed.match(/\b(is|are|was|were|be|been|being)\s+\w+ed\b/gi) ?? [];
+  const passiveMatches = trimmed.match(PASSIVE) ?? [];
   const longest = sentences.reduce((a, b) => (b.split(/\s+/).length > a.split(/\s+/).length ? b : a), "");
   const longestWords = longest.trim().split(/\s+/).length;
 

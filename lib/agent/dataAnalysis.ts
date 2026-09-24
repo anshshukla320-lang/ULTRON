@@ -45,13 +45,14 @@ export async function analyzeCsv(relativePath: string): Promise<string> {
   const rows = lines.slice(1).map(parseCsvLine);
 
   const summaries = headers.map((header, colIdx) => {
-    const values = rows.map((r) => r[colIdx]).filter((v) => v !== undefined && v !== "");
+    const values = rows.map((r) => r[colIdx]?.trim()).filter((v): v is string => v !== undefined && v !== "");
     const numeric = values.map(Number).filter((n) => !Number.isNaN(n));
     if (numeric.length === values.length && numeric.length > 0) {
       const sum = numeric.reduce((a, b) => a + b, 0);
       const mean = sum / numeric.length;
       const sorted = [...numeric].sort((a, b) => a - b);
-      const median = sorted[Math.floor(sorted.length / 2)];
+      const mid = Math.floor(sorted.length / 2);
+      const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
       return `${header}: numeric — min ${Math.min(...numeric)}, max ${Math.max(...numeric)}, mean ${mean.toFixed(2)}, median ${median}`;
     }
     const unique = new Set(values).size;

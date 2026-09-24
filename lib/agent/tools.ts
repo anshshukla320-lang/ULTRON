@@ -666,6 +666,14 @@ export const TOOLS: Anthropic.Tool[] = [
   },
 ];
 
+function parseSex(value: unknown): "male" | "female" {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (["female", "f", "woman"].includes(v)) return "female";
+  if (["male", "m", "man"].includes(v)) return "male";
+  // The formula differs by ~166 kcal/day — don't silently guess.
+  throw new Error(`sex must be "male" or "female" for the Mifflin-St Jeor formula (got "${value}").`);
+}
+
 export async function executeTool(name: ToolName, input: Record<string, unknown>): Promise<string> {
   switch (name) {
     case "open_app":
@@ -765,7 +773,7 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
       return calculateBmi(Number(input.heightCm ?? 0), Number(input.weightKg ?? 0));
     case "calculate_calorie_target":
       return calculateCalorieTarget(
-        input.sex === "female" ? "female" : "male",
+        parseSex(input.sex),
         Number(input.ageYears ?? 0),
         Number(input.heightCm ?? 0),
         Number(input.weightKg ?? 0),
@@ -781,7 +789,7 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
     case "vocab_quiz":
       return vocabQuiz(input.language ? String(input.language) : undefined, input.count ? Number(input.count) : 5);
     case "vocab_result":
-      return vocabResult(String(input.word ?? ""), String(input.language ?? ""), input.correct === true);
+      return vocabResult(String(input.word ?? ""), String(input.language ?? ""), input.correct === true || input.correct === "true");
     case "vocab_summary":
       return vocabSummary(input.language ? String(input.language) : undefined);
     case "call_health_report":

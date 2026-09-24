@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { AUTO_EXECUTE, TOOLS, executeTool, type ToolName } from "@/lib/agent/tools";
+
+const KNOWN_TOOLS = new Set(TOOLS.map((t) => t.name));
 import { recallMemoryForPrompt } from "@/lib/agent/memory";
 import { stashPendingAction, takePendingAction } from "@/lib/agent/pendingActions";
 import { repairToolPairs, trimHistory } from "@/lib/agent/conversationHistory";
@@ -86,7 +88,10 @@ export async function POST(req: Request) {
     );
   }
 
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Request body must be JSON." }, { status: 400 });
+  }
   const resolutionInput: { token?: string; approved?: boolean } | null = body?.resolution ?? null;
 
   const actionsLog: ActionLogEntry[] = [];
@@ -162,10 +167,17 @@ export async function POST(req: Request) {
       const toolUseBlocks = response.content.filter(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
       );
-      const autoBlocks = toolUseBlocks.filter((b) => AUTO_EXECUTE.has(b.name as ToolName));
-      const confirmBlocks = toolUseBlocks.filter((b) => !AUTO_EXECUTE.has(b.name as ToolName));
+      // A tool name the model made up must not reach the confirm modal —
+      // the user would be asked to approve something that can't run.
+      const unknownBlocks = toolUseBlocks.filter((b) => !KNOWN_TOOLS.has(b.name));
+      const autoBlocks = toolUseBlocks.filter((b) => KNOWN_TOOLS.has(b.name) && AUTO_EXECUTE.has(b.name as ToolName));
+      const confirmBlocks = toolUseBlocks.filter((b) => KNOWN_TOOLS.has(b.name) && !AUTO_EXECUTE.has(b.name as ToolName));
 
-      const readyResults: ReadyResult[] = [];
+      const readyResults: ReadyResult[] = unknownBlocks.map((b) => {
+        const msg = `There is no tool named "${b.name}".`;
+        actionsLog.push({ name: b.name, input: b.input, output: msg, status: "error" });
+        return { id: b.id, output: msg, isError: true };
+      });
       for (const b of autoBlocks) {
         try {
           const output = await executeTool(b.name as ToolName, b.input as Record<string, unknown>);
@@ -194,10 +206,14 @@ export async function POST(req: Request) {
       working.push({ role: "user", content: readyResults.map(toolResultBlock) });
     }
 
-    return NextResponse.json(
-      { error: "Agent exceeded the maximum number of tool steps for one command." },
-      { status: 500 },
-    );
+    // Out of steps: still answer out loud (the client otherwise just logs an
+    // error and goes quiet), and keep the work done so far in the history.
+    return NextResponse.json({
+      messages: working,
+      reply: "That's taking more steps than I'm allowed for one command, sir. Tell me how you'd like me to continue.",
+      actions: actionsLog,
+      pending: null,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });
