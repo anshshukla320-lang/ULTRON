@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { escapeHtml } from "@/lib/auth/session";
 import { exchangeCodeForToken } from "@/lib/agent/spotifyAuth";
 
 function page(title: string, body: string) {
@@ -20,7 +21,7 @@ export async function GET(req: Request) {
   const error = url.searchParams.get("error");
 
   if (error) {
-    return page("Spotify — declined", `<p>Spotify sign-in was cancelled or declined (${error}).</p><p><a href="/api/spotify/auth">Try again</a></p>`);
+    return page("Spotify — declined", `<p>Spotify sign-in was cancelled or declined (${escapeHtml(error)}).</p><p><a href="/api/spotify/auth">Try again</a></p>`);
   }
   if (!code) {
     return page("Spotify — error", `<p>No authorization code received.</p><p><a href="/api/spotify/auth">Try again</a></p>`);
@@ -31,6 +32,6 @@ export async function GET(req: Request) {
     return page("Spotify — connected", `<p>Spotify connected. ULTRON can now search, play, pause, and skip tracks on your active device.</p><p><a href="/">Back to ULTRON</a></p>`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return page("Spotify — error", `<p>${msg}</p><p><a href="/api/spotify/auth">Try again</a></p>`);
+    return page("Spotify — error", `<p>${escapeHtml(msg)}</p><p><a href="/api/spotify/auth">Try again</a></p>`);
   }
 }

@@ -57,3 +57,14 @@ export async function isValidSessionToken(token: string | undefined | null): Pro
   const expected = await hmacHex(secret, expStr);
   return timingSafeEqual(sig, expected);
 }
+
+/** Only same-site absolute paths are allowed as a post-login redirect —
+ *  "//evil.com" or "/\evil.com" would otherwise bounce the user off-site. */
+export function safeNextPath(next: string | null | undefined): string {
+  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return "/";
+  return next;
+}
+
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}

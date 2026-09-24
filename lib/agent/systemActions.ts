@@ -8,34 +8,40 @@ import { resolveWorkspacePath, WORKSPACE_ROOT, ensureWorkspace } from "./workspa
 const execFileAsync = promisify(execFile);
 
 /**
- * Launches a process and returns as soon as it has actually started, without
- * waiting for it to exit. Using `stdio: "ignore"` + `detached` + `unref` is
- * required on Windows: an inherited stdio pipe to a GUI app can keep Node's
- * child_process promise from ever resolving until that app is closed.
+ * Hands a target (URL, URI scheme, .lnk shortcut, or bare exe name) to
+ * Windows' own "open" mechanism — the same ShellExecute behind double-click
+ * and the Run dialog. Spawning `explorer.exe <target>` directly is not
+ * reliable: it can report success without actually surfacing anything.
+ *
+ * This used to be `cmd /c start "" <target>`, but cmd re-parses its command
+ * line: every `&` in a URL (most YouTube/search links) cut the URL short and
+ * ran the rest as a separate command — so a URL picked up from a web page
+ * could launch arbitrary programs. PowerShell's Start-Process reads the
+ * target from an environment variable instead, so it is never parsed as
+ * code at all.
  */
-function launchDetached(command: string, args: string[] = []): Promise<void> {
+function openWithShell(target: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "ignore", detached: true, windowsHide: false });
+    const child = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath $env:ULTRON_OPEN_TARGET"],
+      {
+        stdio: "ignore",
+        detached: true,
+        // Hides only PowerShell's own console; the app it opens shows normally.
+        windowsHide: true,
+        env: { ...process.env, ULTRON_OPEN_TARGET: target },
+      },
+    );
     child.once("error", reject);
+    // Return once it has started, without waiting for exit: stdio "ignore"
+    // + detached + unref keeps an inherited pipe from holding the promise
+    // open until the launched app closes.
     setImmediate(() => {
       child.unref();
       resolve();
     });
   });
-}
-
-/**
- * Hands a target (URL, URI scheme, .lnk shortcut, or bare exe name) to
- * Windows' own "open" mechanism — the same one behind double-click and the
- * Run dialog. Spawning `explorer.exe <target>` directly is not reliable: it
- * can report success without actually surfacing anything, since `explorer`
- * only relays the request to the real shell process rather than opening it
- * itself. `cmd /c start` is the confirmed-working native idiom for this.
- * The empty "" argument is required so `start` doesn't mistake the target
- * for its optional window-title argument when it's quoted.
- */
-function openWithShell(target: string): Promise<void> {
-  return launchDetached("cmd.exe", ["/c", "start", "", target]);
 }
 
 const MAX_READ_BYTES = 100_000;

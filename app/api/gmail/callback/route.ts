@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { escapeHtml } from "@/lib/auth/session";
 import { exchangeCodeForToken } from "@/lib/agent/googleAuth";
 
 function page(title: string, body: string) {
@@ -20,7 +21,7 @@ export async function GET(req: Request) {
   const error = url.searchParams.get("error");
 
   if (error) {
-    return page("Gmail — declined", `<p>Google sign-in was cancelled or declined (${error}).</p><p><a href="/api/gmail/auth">Try again</a></p>`);
+    return page("Gmail — declined", `<p>Google sign-in was cancelled or declined (${escapeHtml(error)}).</p><p><a href="/api/gmail/auth">Try again</a></p>`);
   }
   if (!code) {
     return page("Gmail — error", `<p>No authorization code received.</p><p><a href="/api/gmail/auth">Try again</a></p>`);
@@ -34,6 +35,6 @@ export async function GET(req: Request) {
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return page("Gmail — error", `<p>${msg}</p><p><a href="/api/gmail/auth">Try again</a></p>`);
+    return page("Gmail — error", `<p>${escapeHtml(msg)}</p><p><a href="/api/gmail/auth">Try again</a></p>`);
   }
 }

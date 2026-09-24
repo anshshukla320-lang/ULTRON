@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { escapeHtml, safeNextPath } from "@/lib/auth/session";
 
 export async function GET(req: Request) {
-  const failed = new URL(req.url).searchParams.get("error") === "1";
+  const params = new URL(req.url).searchParams;
+  const failed = params.get("error") === "1";
+  const next = safeNextPath(params.get("next"));
   return new NextResponse(
     `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ULTRON — sign in</title>
     <style>
@@ -18,6 +21,7 @@ export async function GET(req: Request) {
       <p>Enter the access password to continue.</p>
       <form method="POST" action="/api/auth/login">
         <input type="password" name="password" placeholder="Password" autofocus required />
+        <input type="hidden" name="next" value="${escapeHtml(next)}" />
         <button type="submit">Sign in</button>
       </form>
       ${failed ? '<p class="error">Wrong password.</p>' : ""}
