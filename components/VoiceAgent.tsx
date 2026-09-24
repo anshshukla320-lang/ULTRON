@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type Anthropic from "@anthropic-ai/sdk";
+import { parseSpeechSegments, stripSpeechMarkup, type SpeechSegment } from "@/lib/speechSegments";
 
 type AgentStatus = "wake" | "listening" | "thinking" | "speaking" | "confirm" | "unsupported";
 
@@ -48,6 +49,33 @@ function detectWake(transcript: string): string | null {
     }
   }
   return null;
+}
+
+async function fetchSegmentAudio(segment: SpeechSegment): Promise<Blob | null> {
+  try {
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: segment.text, lang: segment.lang }),
+    });
+    return res.ok ? await res.blob() : null;
+  } catch {
+    return null;
+  }
+}
+
+function playBlob(blob: Blob): Promise<boolean> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    const finish = (ok: boolean) => {
+      URL.revokeObjectURL(url);
+      resolve(ok);
+    };
+    audio.onended = () => finish(true);
+    audio.onerror = () => finish(false);
+    audio.play().catch(() => finish(false));
+  });
 }
 
 export default function VoiceAgent() {
@@ -119,55 +147,43 @@ export default function VoiceAgent() {
   }, [clearFollowUpTimer, resumeListening]);
 
   // Browser TTS as a last resort — robotic, but keeps the assistant from
-  // going silent if ElevenLabs isn't configured or the request fails.
-  const speakFallback = useCallback(
-    (text: string) => {
-      if (!text || typeof window === "undefined" || !window.speechSynthesis) {
-        setStatus("wake");
-        resumeListening();
-        return;
+  // going silent if Piper/ElevenLabs aren't available for this segment.
+  // Setting utter.lang makes the browser pick a native voice for foreign
+  // phrases when the OS has one installed.
+  const speakWithBrowser = useCallback((segment: SpeechSegment) => {
+    return new Promise<void>((resolve) => {
+      if (typeof window === "undefined" || !window.speechSynthesis) return resolve();
+      const utter = new SpeechSynthesisUtterance(segment.text);
+      if (segment.lang) {
+        utter.lang = segment.lang;
+      } else {
+        utter.rate = 1.02;
+        utter.pitch = 0.85;
       }
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 1.02;
-      utter.pitch = 0.85;
-      utter.onend = () => {
-        armFollowUpWindow();
-      };
-      setStatus("speaking");
+      utter.onend = () => resolve();
+      utter.onerror = () => resolve();
       window.speechSynthesis.speak(utter);
-    },
-    [resumeListening, armFollowUpWindow],
-  );
+    });
+  }, []);
 
+  // A reply may mix English with <lang code="..."> phrases. Each segment is
+  // synthesized separately (all requested up front so there's no gap
+  // between them) and played in order.
   const speak = useCallback(
     async (text: string) => {
-      if (!text) return;
+      const segments = parseSpeechSegments(text);
+      if (segments.length === 0) return;
       setStatus("speaking");
-      try {
-        const res = await fetch("/api/tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        });
-        if (!res.ok) throw new Error(`TTS request failed (${res.status})`);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          armFollowUpWindow();
-        };
-        audio.onerror = () => {
-          URL.revokeObjectURL(url);
-          speakFallback(text);
-        };
-        await audio.play();
-      } catch {
-        speakFallback(text);
+      window.speechSynthesis?.cancel();
+      const audioRequests = segments.map(fetchSegmentAudio);
+      for (let i = 0; i < segments.length; i++) {
+        const blob = await audioRequests[i];
+        const played = blob ? await playBlob(blob) : false;
+        if (!played) await speakWithBrowser(segments[i]);
       }
+      armFollowUpWindow();
     },
-    [speakFallback, armFollowUpWindow],
+    [speakWithBrowser, armFollowUpWindow],
   );
 
   const describeAction = (a: ActionLogEntry) => {
@@ -202,14 +218,14 @@ export default function VoiceAgent() {
         if (data.pending) {
           setPending(data.pending);
           setStatus("confirm");
-          if (data.reply) pushLog("agent", data.reply);
+          if (data.reply) pushLog("agent", stripSpeechMarkup(data.reply));
           return;
         }
 
         setPending(null);
         if (data.reply) {
-          pushLog("agent", data.reply);
-          speak(data.reply);
+          pushLog("agent", stripSpeechMarkup(data.reply));
+          void speak(data.reply);
         } else {
           setStatus("wake");
           resumeListening();
