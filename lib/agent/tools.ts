@@ -18,6 +18,7 @@ import { logExpense, expenseSummary, calculateLoan, convertCurrency } from "./fi
 import { logWorkout, logMeal, fitnessSummary, calculateBmi, calculateCalorieTarget } from "./fitnessTools";
 import { analyzeWriting } from "./writingMetrics";
 import { analyzeCsv } from "./dataAnalysis";
+import { saveVocab, vocabQuiz, vocabResult, vocabSummary } from "./vocabTools";
 
 export type ToolName =
   | "open_app"
@@ -66,7 +67,11 @@ export type ToolName =
   | "log_meal"
   | "fitness_summary"
   | "calculate_bmi"
-  | "calculate_calorie_target";
+  | "calculate_calorie_target"
+  | "save_vocab"
+  | "vocab_quiz"
+  | "vocab_result"
+  | "vocab_summary";
 
 /** Tools in here run immediately. Anything not listed requires the user to
  *  click "Confirm" in the UI before it executes. */
@@ -113,6 +118,10 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "fitness_summary",
   "calculate_bmi",
   "calculate_calorie_target",
+  "save_vocab",
+  "vocab_quiz",
+  "vocab_result",
+  "vocab_summary",
 ]);
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -602,6 +611,54 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "save_vocab",
+    description: "Save a word or phrase to the user's local vocabulary deck for spaced-repetition review. Saving an existing word updates its translation.",
+    input_schema: {
+      type: "object",
+      properties: {
+        word: { type: "string", description: "The word or phrase in the language being learned" },
+        translation: { type: "string", description: "Its meaning in the user's language" },
+        language: { type: "string", description: "Language being learned, e.g. Spanish, Japanese" },
+        example: { type: "string", description: "Optional short example sentence using the word" },
+      },
+      required: ["word", "translation", "language"],
+    },
+  },
+  {
+    name: "vocab_quiz",
+    description: "Get the vocabulary words that are due for review (spaced repetition). Returns answers for grading — quiz the user one word at a time without revealing the answer first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        language: { type: "string", description: "Optional: only quiz this language" },
+        count: { type: "number", description: "Max words to review, default 5" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "vocab_result",
+    description: "Record whether the user recalled a vocabulary word correctly during a quiz. Moves it up a review box if correct, back to box 1 if missed.",
+    input_schema: {
+      type: "object",
+      properties: {
+        word: { type: "string" },
+        language: { type: "string" },
+        correct: { type: "boolean" },
+      },
+      required: ["word", "language", "correct"],
+    },
+  },
+  {
+    name: "vocab_summary",
+    description: "Summarize the vocabulary deck per language — total words, due now, mastered, and recall accuracy.",
+    input_schema: {
+      type: "object",
+      properties: { language: { type: "string", description: "Optional: only this language" } },
+      required: [],
+    },
+  },
+  {
     name: "call_health_report",
     description:
       "Place a real phone call (via Twilio) to the user's phone number and read out a spoken summary of this PC's health — disk space, memory, CPU load, and recent system errors — plus any important unread Gmail messages. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and USER_PHONE_NUMBER to be set in .env.local. This places a real, billed phone call, so it always requires the user's explicit confirmation before it runs.",
@@ -714,6 +771,19 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
         Number(input.weightKg ?? 0),
         String(input.activityLevel ?? "light"),
       );
+    case "save_vocab":
+      return saveVocab(
+        String(input.word ?? ""),
+        String(input.translation ?? ""),
+        String(input.language ?? ""),
+        input.example ? String(input.example) : undefined,
+      );
+    case "vocab_quiz":
+      return vocabQuiz(input.language ? String(input.language) : undefined, input.count ? Number(input.count) : 5);
+    case "vocab_result":
+      return vocabResult(String(input.word ?? ""), String(input.language ?? ""), input.correct === true);
+    case "vocab_summary":
+      return vocabSummary(input.language ? String(input.language) : undefined);
     case "call_health_report":
       return placeHealthReportCall();
     case "spotify_play":
