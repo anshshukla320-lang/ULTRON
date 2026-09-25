@@ -70,12 +70,16 @@ test("disk cleanup deletes only safe files", async () => {
   await file(path.join(chrome, "Default", "Cookies"), 777);
   await file(path.join(chrome, "Default", "History"), 777);
 
+  // On Windows temp_files also covers the real C:\\Windows\\Temp, so exact
+  // totals only hold elsewhere; the safety checks below hold everywhere.
+  const exact = process.platform !== "win32";
   const report = await scanDiskJunk();
-  assert.match(report, /temp_files: 1000 B/);
+  if (exact) assert.match(report, /temp_files: 1000 B/);
   assert.match(report, /browser_cache: 4\.9 KB/);
 
   const result = await cleanDiskJunk(["temp_files", "browser_cache"]);
-  assert.match(result, /Freed 5\.9 KB/);
+  if (exact) assert.match(result, /Freed 5\.9 KB/);
+  assert.match(result, /browser_cache: freed 4\.9 KB/);
   await assert.rejects(fs.access(path.join(tmp, "old.tmp")));
   await fs.access(path.join(tmp, "fresh.tmp")); // recent temp file kept
   await fs.access(path.join(chrome, "Default", "Cookies")); // never touched
