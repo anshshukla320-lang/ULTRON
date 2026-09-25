@@ -45,6 +45,36 @@ Click **GESTURES OFF** (or press `G`) and allow camera access, then:
 | `R` | Reset the view |
 | `+` / `−` | Zoom in / out |
 
+## Voice assistant
+
+Say **"Hey Ultron"** and talk. Replies stream: ULTRON starts speaking the
+first sentence while the rest is still being written. Say **"stop"** (or
+"never mind") to cut it off, or **"Hey Ultron, …"** to interrupt with a new
+request. `V` mutes the mic and voice.
+
+A few things to try:
+
+| Say | What happens |
+| --- | --- |
+| "Set a 10 minute timer for the pasta" | Announced out loud when it's done |
+| "Remind me at 6 to call mum" | Reminders survive restarts |
+| "Brief me" / "Brief me every day at 7:30" | Weather, today's calendar, important email, tasks |
+| "What's the weather tomorrow?" | Live forecast (set `ULTRON_HOME_LOCATION`) |
+| "What's this error on my screen?" | Takes a screenshot and reads it |
+| "Volume to 30" / "Next track" / "Lock the PC" | PC and media controls |
+| "Free up some disk space" | Scans junk, deletes only what you approve |
+
+Anything risky (sending email, running code, installing apps, shutting
+down, deleting files) shows a confirm box first. Setup for keys and
+accounts is in `.env.example`.
+
+### Tests
+
+```bash
+npm test        # unit + agent-loop tests (no API key or Windows needed)
+npm run typecheck
+```
+
 ## How it works
 
 - **`lib/orbScene.ts`** — the Three.js scene: layered wireframe shells, a spiral

@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
@@ -21,6 +23,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.185.0",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
