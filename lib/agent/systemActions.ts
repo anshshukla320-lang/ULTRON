@@ -1,9 +1,10 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { resolveWorkspacePath, WORKSPACE_ROOT, ensureWorkspace } from "./workspace";
+import { runPowerShell } from "./powershell";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,28 +21,23 @@ const execFileAsync = promisify(execFile);
  * target from an environment variable instead, so it is never parsed as
  * code at all.
  */
-function openWithShell(target: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath $env:ULTRON_OPEN_TARGET"],
-      {
-        stdio: "ignore",
-        detached: true,
-        // Hides only PowerShell's own console; the app it opens shows normally.
-        windowsHide: true,
-        env: { ...process.env, ULTRON_OPEN_TARGET: target },
-      },
-    );
-    child.once("error", reject);
-    // Return once it has started, without waiting for exit: stdio "ignore"
-    // + detached + unref keeps an inherited pipe from holding the promise
-    // open until the launched app closes.
-    setImmediate(() => {
-      child.unref();
-      resolve();
-    });
-  });
+export async function openWithShell(target: string, opts: { app?: boolean } = {}): Promise<number | null> {
+  // Waits for Start-Process itself (it returns as soon as Windows has
+  // launched the target — not when the app closes), so a failed launch is
+  // reported instead of claiming success. For apps, -PassThru returns the
+  // new process id so callers can confirm something actually started.
+  const script = opts.app
+    ? "$p = Start-Process -FilePath $env:ULTRON_OPEN_TARGET -PassThru -ErrorAction Stop; if ($p) { $p.Id }"
+    : "Start-Process -FilePath $env:ULTRON_OPEN_TARGET -ErrorAction Stop";
+  try {
+    const out = await runPowerShell(script, { ULTRON_OPEN_TARGET: target }, 20_000);
+    const pid = Number(out.split(/\s+/).pop());
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch (err) {
+    const e = err as { stderr?: string; message?: string };
+    const reason = (e.stderr || e.message || "").split("\n").find((l) => l.trim() && !l.startsWith("At line")) ?? "unknown error";
+    throw new Error(`Windows couldn't open "${target}": ${reason.trim()}`);
+  }
 }
 
 const MAX_READ_BYTES = 100_000;
@@ -111,13 +107,13 @@ export async function openApp(name: string): Promise<string> {
   const key = name.trim().toLowerCase();
   const known = KNOWN_APPS[key];
   if (known) {
-    await openWithShell(known);
+    await openWithShell(known, { app: true });
     return `Launched "${name}".`;
   }
 
   const shortcut = await findShortcut(key);
   if (shortcut) {
-    await openWithShell(shortcut);
+    await openWithShell(shortcut, { app: true });
     return `Launched "${name}".`;
   }
 

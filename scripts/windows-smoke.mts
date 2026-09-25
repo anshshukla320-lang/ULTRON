@@ -5,7 +5,10 @@
 import { execFileSync } from "node:child_process";
 import { lookAtScreen } from "../lib/agent/screen";
 import { setVolume, mediaControl, setBrightness, powerAction, cancelShutdown } from "../lib/agent/pcControls";
-import { openApp, getSystemInfo } from "../lib/agent/systemActions";
+import { openApp, openWithShell, getSystemInfo } from "../lib/agent/systemActions";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { scanDiskJunk, cleanDiskJunk } from "../lib/agent/diskCleanup";
 import { runCode } from "../lib/agent/codeRunner";
 import { getWeather } from "../lib/agent/weather";
@@ -54,13 +57,29 @@ await check("set_brightness (VMs have no brightness control — expect the frien
   }
 });
 
-await check("open_app launches Notepad via Start-Process", async () => {
-  const before = processRunning("notepad.exe");
+await check("open_app launches an app and it's really running", async () => {
   const msg = await openApp("notepad");
   for (let i = 0; i < 20 && !processRunning("notepad.exe"); i++) await sleep(500);
-  if (!processRunning("notepad.exe")) throw new Error(`notepad not running after "${msg}" (before: ${before})`);
-  execFileSync("taskkill", ["/IM", "notepad.exe", "/F"]);
+  const running = processRunning("notepad.exe");
+  try {
+    execFileSync("taskkill", ["/IM", "notepad.exe", "/F"], { stdio: "ignore" });
+  } catch {
+    // not running — reported below
+  }
+  if (!running) throw new Error(`"${msg}" but no notepad.exe process`);
   return msg;
+});
+
+await check("openWithShell passes a target containing & through intact", async () => {
+  // Under the old `cmd /c start`, the "&" would have split this path and
+  // run the rest as a command. Opening it with -PassThru proves the whole
+  // path reached Windows.
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ultron-smoke-"));
+  const file = path.join(dir, "a&b.cmd");
+  writeFileSync(file, "@exit 0\r\n");
+  const pid = await openWithShell(file, { app: true });
+  if (!pid) throw new Error("no process started");
+  return `started pid ${pid} for ${file}`;
 });
 
 await check("power_action shutdown, then cancel_shutdown", async () => {

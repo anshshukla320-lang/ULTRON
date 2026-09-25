@@ -171,8 +171,16 @@ export async function cleanDiskJunk(categories: string[]): Promise<string> {
   for (const category of chosen as CleanupCategory[]) {
     if (category === "recycle_bin") {
       const before = await recycleBinBytes();
+      if (before === 0) {
+        lines.push("recycle_bin: already empty.");
+        continue;
+      }
       try {
-        await runPowerShell("Clear-RecycleBin -Force -ErrorAction SilentlyContinue");
+        // Clear-RecycleBin throws on drives whose bin is already empty even
+        // when others aren't; only fail if items are actually left behind.
+        await runPowerShell(
+          "try { Clear-RecycleBin -Force -ErrorAction Stop } catch { if ((New-Object -ComObject Shell.Application).NameSpace(10).Items().Count -gt 0) { throw } }",
+        );
         freedTotal += before;
         lines.push(`recycle_bin: emptied (${formatBytes(before)}).`);
       } catch (err) {
