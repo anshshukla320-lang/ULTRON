@@ -39,6 +39,23 @@ export async function listUpcomingEvents(maxResults = 10): Promise<string> {
   return items.map(formatEvent).join("\n");
 }
 
+/** The rest of today's events (for the morning briefing). */
+export async function listTodaysEvents(): Promise<string> {
+  const endOfDay = new Date();
+  endOfDay.setHours(23, 59, 59, 999);
+  const params = new URLSearchParams({
+    maxResults: "20",
+    singleEvents: "true",
+    orderBy: "startTime",
+    timeMin: new Date().toISOString(),
+    timeMax: endOfDay.toISOString(),
+  });
+  const data = await calendarFetch<{ items?: CalendarEvent[] }>(`/calendars/primary/events?${params.toString()}`);
+  const items = data.items ?? [];
+  if (items.length === 0) return "Nothing else on the calendar today.";
+  return items.map(formatEvent).join("\n");
+}
+
 export async function createEvent(summary: string, startISO: string, endISO: string, description?: string): Promise<string> {
   const body = {
     summary,

@@ -19,6 +19,12 @@ import { logWorkout, logMeal, fitnessSummary, calculateBmi, calculateCalorieTarg
 import { analyzeWriting } from "./writingMetrics";
 import { analyzeCsv } from "./dataAnalysis";
 import { saveVocab, vocabQuiz, vocabResult, vocabSummary } from "./vocabTools";
+import { setTimer, setReminder, listReminders, cancelReminder, setDailyBriefing } from "./reminders";
+import { morningBriefing } from "./briefing";
+import { getWeather } from "./weather";
+import { lookAtScreen } from "./screen";
+import { setVolume, mediaControl, lockPc, setBrightness, powerAction, cancelShutdown } from "./pcControls";
+import { scanDiskJunk, cleanDiskJunk, CLEANUP_CATEGORIES } from "./diskCleanup";
 
 export type ToolName =
   | "open_app"
@@ -71,7 +77,23 @@ export type ToolName =
   | "save_vocab"
   | "vocab_quiz"
   | "vocab_result"
-  | "vocab_summary";
+  | "vocab_summary"
+  | "set_timer"
+  | "set_reminder"
+  | "list_reminders"
+  | "cancel_reminder"
+  | "set_daily_briefing"
+  | "morning_briefing"
+  | "get_weather"
+  | "look_at_screen"
+  | "set_volume"
+  | "media_control"
+  | "lock_pc"
+  | "set_brightness"
+  | "power_action"
+  | "cancel_shutdown"
+  | "scan_disk_junk"
+  | "clean_disk_junk";
 
 /** Tools in here run immediately. Anything not listed requires the user to
  *  click "Confirm" in the UI before it executes. */
@@ -122,6 +144,21 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "vocab_quiz",
   "vocab_result",
   "vocab_summary",
+  "set_timer",
+  "set_reminder",
+  "list_reminders",
+  "cancel_reminder",
+  "set_daily_briefing",
+  "morning_briefing",
+  "get_weather",
+  "look_at_screen",
+  "set_volume",
+  "media_control",
+  "lock_pc",
+  "set_brightness",
+  "cancel_shutdown",
+  "scan_disk_junk",
+  // power_action and clean_disk_junk deliberately need confirmation.
 ]);
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -659,6 +696,142 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "set_timer",
+    description: "Start a countdown timer. ULTRON announces it out loud when it finishes (the ULTRON page must be open).",
+    input_schema: {
+      type: "object",
+      properties: {
+        duration_seconds: { type: "number", description: "Timer length in seconds, e.g. 300 for 5 minutes" },
+        label: { type: "string", description: "Optional name, e.g. 'pasta' (announced as 'your pasta timer is done')" },
+      },
+      required: ["duration_seconds"],
+    },
+  },
+  {
+    name: "set_reminder",
+    description: "Remind the user about something at a specific time or after a delay. Give exactly one of `at` or `in_minutes`. Use the current local time from the system prompt to work out `at`.",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "What to remind them about, phrased to be read back, e.g. 'call your mother'" },
+        at: { type: "string", description: "Local date-time, e.g. 2026-09-25T17:30" },
+        in_minutes: { type: "number", description: "Minutes from now" },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "list_reminders",
+    description: "List active timers and reminders (with ids) and the daily briefing time.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "cancel_reminder",
+    description: "Cancel timers/reminders by id, by words in their text, by kind ('timer'), or 'all'.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "An id from list_reminders, text to match, 'timer', or 'all'" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "set_daily_briefing",
+    description: "Schedule the morning briefing to play automatically every day at a time, or turn it off.",
+    input_schema: {
+      type: "object",
+      properties: { time: { type: "string", description: "24-hour local time like 07:30, or 'off'" } },
+      required: ["time"],
+    },
+  },
+  {
+    name: "morning_briefing",
+    description: "Gather a morning briefing in one call: weather, the rest of today's calendar, important unread email, open tasks, and reminders. Summarize it in a few spoken sentences — don't read it out verbatim.",
+    input_schema: {
+      type: "object",
+      properties: { location: { type: "string", description: "City for the weather, if not the user's home location" } },
+      required: [],
+    },
+  },
+  {
+    name: "get_weather",
+    description: "Current weather plus today's and tomorrow's forecast for a place (live, Open-Meteo). Omit location to use the user's home location.",
+    input_schema: {
+      type: "object",
+      properties: { location: { type: "string", description: "City name, optionally with region/country, e.g. 'Pune, India'" } },
+      required: [],
+    },
+  },
+  {
+    name: "look_at_screen",
+    description: "Take a screenshot of the user's screen and look at it. Only use when the user asks about something on their screen ('what's this error', 'summarize this page').",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "set_volume",
+    description: "Change the PC's volume using the media keys. 'set' goes to an exact level; mute is a toggle.",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "One of: up, down, set, toggle_mute" },
+        amount: { type: "number", description: "Percent to change by (up/down, default 10) or the level to set (0-100)" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "media_control",
+    description: "Control whatever media is playing (any app, not just Spotify) with the media keys.",
+    input_schema: {
+      type: "object",
+      properties: { action: { type: "string", description: "One of: play_pause, next, previous, stop" } },
+      required: ["action"],
+    },
+  },
+  {
+    name: "lock_pc",
+    description: "Lock the PC (same as Windows+L).",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "set_brightness",
+    description: "Set screen brightness (laptop screens only; external monitors don't support it).",
+    input_schema: {
+      type: "object",
+      properties: { level: { type: "number", description: "0-100" } },
+      required: ["level"],
+    },
+  },
+  {
+    name: "power_action",
+    description: "Put the PC to sleep, or shut down / restart it. Shutdown and restart wait 60 seconds so they can be cancelled.",
+    input_schema: {
+      type: "object",
+      properties: { action: { type: "string", description: "One of: sleep, shutdown, restart" } },
+      required: ["action"],
+    },
+  },
+  {
+    name: "cancel_shutdown",
+    description: "Cancel a shutdown or restart that's counting down.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "scan_disk_junk",
+    description: "Measure how much space safe-to-delete junk is using (temp files, browser caches, thumbnail cache, npm cache, Recycle Bin). Deletes nothing.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "clean_disk_junk",
+    description: `Delete junk found by scan_disk_junk. Never touches Downloads or personal files. Categories: ${CLEANUP_CATEGORIES.join(", ")}.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        categories: { type: "array", items: { type: "string" }, description: "Which categories to clean" },
+      },
+      required: ["categories"],
+    },
+  },
+  {
     name: "call_health_report",
     description:
       "Place a real phone call (via Twilio) to the user's phone number and read out a spoken summary of this PC's health — disk space, memory, CPU load, and recent system errors — plus any important unread Gmail messages. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and USER_PHONE_NUMBER to be set in .env.local. This places a real, billed phone call, so it always requires the user's explicit confirmation before it runs.",
@@ -674,7 +847,10 @@ function parseSex(value: unknown): "male" | "female" {
   throw new Error(`sex must be "male" or "female" for the Mifflin-St Jeor formula (got "${value}").`);
 }
 
-export async function executeTool(name: ToolName, input: Record<string, unknown>): Promise<string> {
+/** Most tools return text; look_at_screen also returns an image for Claude to see. */
+export type ToolOutput = string | { text: string; image: { mediaType: "image/png" | "image/jpeg"; data: string } };
+
+export async function executeTool(name: ToolName, input: Record<string, unknown>): Promise<ToolOutput> {
   switch (name) {
     case "open_app":
       return actions.openApp(String(input.name ?? ""));
@@ -792,6 +968,42 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
       return vocabResult(String(input.word ?? ""), String(input.language ?? ""), input.correct === true || input.correct === "true");
     case "vocab_summary":
       return vocabSummary(input.language ? String(input.language) : undefined);
+    case "set_timer":
+      return setTimer(Number(input.duration_seconds), input.label ? String(input.label) : undefined);
+    case "set_reminder":
+      return setReminder(
+        String(input.text ?? ""),
+        input.at ? String(input.at) : undefined,
+        input.in_minutes !== undefined ? Number(input.in_minutes) : undefined,
+      );
+    case "list_reminders":
+      return listReminders();
+    case "cancel_reminder":
+      return cancelReminder(String(input.query ?? ""));
+    case "set_daily_briefing":
+      return setDailyBriefing(String(input.time ?? ""));
+    case "morning_briefing":
+      return morningBriefing(input.location ? String(input.location) : undefined);
+    case "get_weather":
+      return getWeather(input.location ? String(input.location) : undefined);
+    case "look_at_screen":
+      return lookAtScreen();
+    case "set_volume":
+      return setVolume(String(input.action ?? ""), input.amount !== undefined ? Number(input.amount) : undefined);
+    case "media_control":
+      return mediaControl(String(input.action ?? ""));
+    case "lock_pc":
+      return lockPc();
+    case "set_brightness":
+      return setBrightness(Number(input.level));
+    case "power_action":
+      return powerAction(String(input.action ?? ""));
+    case "cancel_shutdown":
+      return cancelShutdown();
+    case "scan_disk_junk":
+      return scanDiskJunk();
+    case "clean_disk_junk":
+      return cleanDiskJunk(Array.isArray(input.categories) ? input.categories.map(String) : [String(input.categories ?? "")]);
     case "call_health_report":
       return placeHealthReportCall();
     case "spotify_play":

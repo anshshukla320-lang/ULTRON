@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type Anthropic from "@anthropic-ai/sdk";
+import type { ToolOutput } from "./tools";
 
 export interface PendingToolUse {
   id: string;
@@ -9,7 +10,7 @@ export interface PendingToolUse {
 
 export interface PendingReadyResult {
   id: string;
-  output: string;
+  output: ToolOutput;
   isError?: boolean;
 }
 

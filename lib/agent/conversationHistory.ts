@@ -55,3 +55,21 @@ export function trimHistory(messages: Anthropic.MessageParam[], max = MAX_HISTOR
   }
   return messages.slice(-1);
 }
+
+/** Replaces image blocks inside tool results with a short note. Used on the
+ *  history sent back to the browser, which resends it every turn. */
+export function stripImages(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  return messages.map((m) => {
+    if (m.role !== "user" || typeof m.content === "string") return m;
+    let changed = false;
+    const content = m.content.map((b) => {
+      if (b.type !== "tool_result" || !Array.isArray(b.content) || !b.content.some((c) => c.type === "image")) return b;
+      changed = true;
+      return {
+        ...b,
+        content: b.content.map((c) => (c.type === "image" ? { type: "text" as const, text: "[screenshot no longer attached]" } : c)),
+      };
+    });
+    return changed ? { ...m, content } : m;
+  });
+}

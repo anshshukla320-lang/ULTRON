@@ -12,8 +12,9 @@ You have long-term memory via the remember/forget tools, shared with the app —
 If the user sounds done (says bye, thanks, nothing else, that's all), give a brief goodbye and don't ask another question.`;
 
 function buildPhoneSystemPrompt(memoryNotes: string): string {
-  if (!memoryNotes) return PHONE_SYSTEM_PROMPT_BASE;
-  return `${PHONE_SYSTEM_PROMPT_BASE}\n\nThings you've learned and remembered from earlier conversations (use naturally where relevant — don't recite this list):\n${memoryNotes}`;
+  const base = `${PHONE_SYSTEM_PROMPT_BASE}\nCurrent local date and time: ${new Date().toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" })}.`;
+  if (!memoryNotes) return base;
+  return `${base}\n\nThings you've learned and remembered from earlier conversations (use naturally where relevant — don't recite this list):\n${memoryNotes}`;
 }
 
 function extractText(content: Anthropic.ContentBlock[]): string {
@@ -60,7 +61,8 @@ export async function runPhoneTurn(
       }
       try {
         const output = await executeTool(b.name as ToolName, b.input as Record<string, unknown>);
-        results.push({ type: "tool_result", tool_use_id: b.id, content: output });
+        // No screen on a phone call — send only the text part of image results.
+        results.push({ type: "tool_result", tool_use_id: b.id, content: typeof output === "string" ? output : output.text });
       } catch (err) {
         results.push({ type: "tool_result", tool_use_id: b.id, content: err instanceof Error ? err.message : String(err), is_error: true });
       }
