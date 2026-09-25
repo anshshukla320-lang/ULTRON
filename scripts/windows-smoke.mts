@@ -1,6 +1,6 @@
 // Runs ULTRON's Windows-only tools for real on a Windows machine (used by
 // the "windows-smoke" CI job; also safe to run by hand: `npx tsx
-// scripts/windows-smoke.ts`). It never locks, sleeps, or shuts the PC
+// scripts/windows-smoke.mts`). It never locks, sleeps, or shuts the PC
 // down for real — the shutdown check is cancelled immediately.
 import { execFileSync } from "node:child_process";
 import { lookAtScreen } from "../lib/agent/screen";
