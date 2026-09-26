@@ -1,0 +1,113 @@
+name: Android app
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write # publishing the APK as a release (main only)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The same signing key every build, so a new APK installs as an update.
+      # Set once as repository secrets (README > Phone app > Signing).
+      - name: Signing key from secrets (if set)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/ultron.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/ultron.jks" >> "$GITHUB_ENV"
+            echo "Signing with the ULTRON release key."
+          else
+            echo "::warning::No ANDROID_KEYSTORE_B64 secret — signing with a throwaway key; installing this APK over an older one will need an uninstall first."
+          fi
+
+      - name: Brain tests (plain Kotlin)
+        run: ./gradlew :core:test --console=plain
+
+      - name: Build the APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: ./gradlew :app:assembleRelease --console=plain
+
+      - name: Name the APK
+        run: cp app/build/outputs/apk/release/app-release.apk "ULTRON-${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ULTRON-apk
+          path: android/ULTRON-${{ github.run_number }}.apk
+
+  # Installs the APK on a real Android 14 emulator, opens it, and fails if it
+  # crashes; the screenshot is kept as an artifact.
+  emulator:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ULTRON-apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            adb install -r ULTRON-*.apk
+            adb logcat -c
+            adb shell am start -W -n ai.ultron.phone/.MainActivity
+            sleep 8
+            adb shell pidof ai.ultron.phone || (adb logcat -d -s AndroidRuntime:E; exit 1)
+            adb exec-out screencap -p > main.png
+            adb shell am start -W -a ai.ultron.phone.LISTEN -n ai.ultron.phone/.MainActivity
+            sleep 4
+            adb exec-out screencap -p > listen.png
+            adb shell input keyevent KEYCODE_BACK
+            adb shell pidof ai.ultron.phone || true
+            if adb logcat -d -s AndroidRuntime:E | grep -q "Process: ai.ultron.phone"; then adb logcat -d -s AndroidRuntime:E; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-screenshots
+          path: "*.png"
+
+  release:
+    needs: [build, emulator]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ULTRON-apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-${{ github.run_number }}
+          name: ULTRON for Android (build ${{ github.run_number }})
+          make_latest: true
+          files: ULTRON-*.apk
+          body: |
+            Open this page on your phone, tap the .apk below, and allow installing from your browser when Android asks.
+            Setup: README > Phone app.

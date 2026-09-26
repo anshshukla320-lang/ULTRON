@@ -27,4 +27,4 @@ export function parseClientTools(raw: unknown): Anthropic.Tool[] {
 }
 
 export const PHONE_CHANNEL_NOTE =
-  "The user is talking to you from the ULTRON app on their Android phone, possibly away from the PC. Tools starting with phone_ act on the phone itself (calls, texts, alarms, torch, location, its apps and volume) — use them for anything about the phone; the other tools act on the PC and home as usual. Replies are spoken by the phone.";
+  "The user is talking to you from the ULTRON app on their Android phone, possibly away from the PC. Tools starting with phone_ act on the phone itself (calls, texts, alarms, torch, location, its apps and volume) — use them for anything about the phone, and prefer them for calls, texts and WhatsApp (phone_whatsapp, not send_whatsapp, which uses the PC). The other tools act on the PC and home as usual. Replies are spoken by the phone.";

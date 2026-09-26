@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="listen"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/talk">
+        <intent
+            android:action="ai.ultron.phone.LISTEN"
+            android:targetPackage="ai.ultron.phone"
+            android:targetClass="ai.ultron.phone.MainActivity" />
+    </shortcut>
+</shortcuts>

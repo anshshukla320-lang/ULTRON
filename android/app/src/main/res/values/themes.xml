@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#FF050302</color>
+    <color name="amber">#FFFFAA30</color>
+    <color name="amber_dim">#99FFAA30</color>
+    <color name="text">#FFF3E3C8</color>
+    <color name="muted">#FF9A8568</color>
+
+    <style name="Theme.Ultron" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:colorAccent">@color/amber</item>
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:textColorSecondary">@color/muted</item>
+    </style>
+</resources>
