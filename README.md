@@ -137,7 +137,7 @@ A few things to try:
 - **Custom voice.** Settings > Voice: pick a voice and speed.
   `scripts\install-piper-voice.ps1 butler` (or jarvis, us-male, us-female,
   uk-female, narrator) adds more.
-- **Phone app.** Use ULTRON from your phone — see below.
+- **Phone app.** A real Android app with ULTRON's mind — see below.
 
 Anything risky (sending email, running code, installing apps, shutting
 down, deleting files) shows a confirm box first. Setup for keys and
@@ -179,21 +179,50 @@ plug that works with Smart Life. Name the plug "Fan" in the app.
 To switch the TV on from standby, turn on *network standby* / *remote start*
 in the TV's settings if it has it.
 
-### Phone app
+### Phone app (Android)
 
-ULTRON installs on your phone like an app and uses the PC's brain, smart
-home and memory. The microphone only works over HTTPS, so the easiest way is
-[Tailscale](https://tailscale.com) (free), which also works away from home:
+A real Android app with ULTRON's mind. When your PC is reachable it *is*
+the full ULTRON — the same memory, routines, smart home, Gmail and PC
+control — plus the phone's own abilities, which ULTRON on the PC can use:
+calls, texts, WhatsApp, contacts, alarms, timers, opening apps, directions,
+torch, location, battery, volume and music. When the PC is off or out of
+reach, the phone thinks on its own (Claude directly, with the same phone
+abilities, web search and a copy of what ULTRON knows about you); anything
+it learns is handed back to the PC next time. The badge at the top shows
+which brain answered.
 
-1. Install Tailscale on the PC and the phone and sign in to both with the
-   same account.
-2. On the PC: `tailscale serve --bg 3000`. It prints an address like
-   `https://my-pc.tailnet-name.ts.net`.
-3. Open that address in Chrome on the phone, log in with your ULTRON
-   password, then menu > **Add to Home screen**.
+**Install:** open the latest *ULTRON for Android* release on this repository's
+GitHub page (Releases) on your phone, tap the `.apk`, and allow installing
+from your browser when Android asks.
 
-Only your own devices can reach it. Voice replies play on the phone; on the
-phone, webcam presence never locks the PC.
+**Set up (⚙ in the app):**
+
+- **PC address and password** — the same password as the web page. To reach
+  the PC away from home, use [Tailscale](https://tailscale.com) (free):
+  install it on the PC and the phone with the same account, run
+  `tailscale serve --bg 3000` on the PC, and enter the `https://….ts.net`
+  address it prints. At home, `http://<PC's IP>:3000` also works.
+- **Anthropic API key** (optional) — lets the phone answer when the PC is
+  away. Stored encrypted on the phone.
+- *Test connection* checks the PC.
+
+**Talk to it:** tap the orb; tap again to interrupt. It keeps listening for a
+follow-up after each reply (switch off in settings). Start talking in one tap
+from the Quick Settings tile (pull down the shade → ✎ → add ULTRON) or by
+long-pressing the app icon → *Talk to ULTRON*. Calls and texts always show a
+Yes/No on screen first; WhatsApp opens with the message ready for you to send.
+
+**Signing (once, so updates install over the old app):** the build is signed
+with a key kept in this repository's secrets. Without it each build gets a new
+key and Android makes you uninstall before updating (losing the app's
+settings). Add three secrets under GitHub → Settings → Secrets and variables →
+Actions: `ANDROID_KEYSTORE_B64` (the keystore file, base64), `ANDROID_KEYSTORE_PASSWORD`
+and `ANDROID_KEY_ALIAS`. The app is built by `.github/workflows/android.yml`;
+`android/` holds the source (`core/` is the brain and PC link, testable with
+`./gradlew :core:test`; `app/` is the Android app).
+
+On an iPhone, open ULTRON in Safari over Tailscale and use Share → **Add to
+Home Screen** instead.
 
 ### Tests
 

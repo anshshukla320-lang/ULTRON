@@ -173,6 +173,7 @@ class PcBrain(
                 throw PcUnavailable(err ?: "The PC answered ${res.code}.")
             }
             val source = res.body!!.source()
+            var firstText = true
             while (true) {
                 val line = try {
                     source.readUtf8Line()
@@ -185,7 +186,11 @@ class PcBrain(
                 val event = json.readValue(line, Map::class.java) as Map<String, Any?>
                 when (event["type"]) {
                     "text" -> {
-                        val t = event["text"].toString()
+                        var t = event["text"].toString()
+                        // A reply resumed after the phone ran a tool continues the
+                        // same speech: "Texting Priya." + "Done." needs a space.
+                        if (firstText && spoken.isNotEmpty() && !spoken.last().isWhitespace() && !t.first().isWhitespace()) t = " $t"
+                        firstText = false
                         spoken.append(t)
                         ui.onText(t)
                     }
