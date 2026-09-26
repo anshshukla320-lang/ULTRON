@@ -31,6 +31,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Show the latest whisper.cpp release assets (diagnostics)
+        run: (Invoke-RestMethod "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest" -Headers @{ "User-Agent" = "ULTRON-CI" }).assets | ForEach-Object { $_.name }
       - name: Install Whisper (tiny model) with ULTRON's own installer
         run: powershell -ExecutionPolicy Bypass -File scripts/install-whisper.ps1 -Model tiny
       - run: npx tsx scripts/windows-smoke.mts
