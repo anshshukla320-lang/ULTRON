@@ -5,7 +5,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { stripSpeechMarkup } from "@/lib/speechSegments";
 import { SentenceChunker } from "@/lib/sentenceChunker";
 import { SpeechPlayer } from "@/lib/speechPlayer";
-import { detectWake, isStopCommand, leadingWakeCommand, looksLikeEcho, stripLeadingWake } from "@/lib/voiceCommands";
+import { detectWake, isRepeatOf, isStopCommand, leadingWakeCommand, looksLikeEcho, stripLeadingWake } from "@/lib/voiceCommands";
 
 type AgentStatus = "wake" | "listening" | "thinking" | "speaking" | "confirm" | "unsupported";
 
@@ -36,8 +36,16 @@ type AgentEvent =
 
 interface DueReminder {
   id: string;
-  kind: "timer" | "reminder" | "briefing";
+  kind: "timer" | "reminder" | "briefing" | "notice";
   text: string;
+}
+
+// Mirrors SpeakingSignals in lib/agent/signals.ts.
+interface SpeakingSignals {
+  wordsPerSecond?: number;
+  interruptedLastReply?: boolean;
+  repeatedRequest?: boolean;
+  quickFollowUp?: boolean;
 }
 
 interface LogEntry {
@@ -108,6 +116,15 @@ export default function VoiceAgent() {
   const turnRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const reminderQueueRef = useRef<DueReminder[]>([]);
+  // How the user is speaking — measured per utterance, sent with the next
+  // request so ULTRON can match its tone (see lib/agent/signals.ts).
+  const utteranceStartRef = useRef<number | null>(null);
+  const lastUtteranceRef = useRef("");
+  const interruptedRef = useRef(false);
+  const signalsRef = useRef<SpeakingSignals>({});
+  // Plain transcript of the current conversation, handed to the memory
+  // summarizer when the conversation ends.
+  const transcriptRef = useRef<Anthropic.MessageParam[]>([]);
 
   const player = () => (playerRef.current ??= new SpeechPlayer());
 
@@ -149,6 +166,18 @@ export default function VoiceAgent() {
     resumeListening();
   }, [clearFollowUpTimer, setStatusNow, resumeListening]);
 
+  const consolidateConversation = useCallback((viaBeacon = false) => {
+    const messages = transcriptRef.current;
+    if (!messages.some((m) => m.role === "user")) return;
+    transcriptRef.current = [];
+    const body = JSON.stringify({ messages });
+    if (viaBeacon && navigator.sendBeacon) {
+      navigator.sendBeacon("/api/memory/consolidate", new Blob([body], { type: "application/json" }));
+    } else {
+      void fetch("/api/memory/consolidate", { method: "POST", headers: { "Content-Type": "application/json" }, body }).catch(() => {});
+    }
+  }, []);
+
   // After ULTRON replies, stay in "listening for a follow-up" mode instead
   // of immediately requiring "hey ultron" again — matches the phone call's
   // conversation loop. Reverts to wake mode on its own if nothing is said
@@ -162,8 +191,16 @@ export default function VoiceAgent() {
       followUpTimerRef.current = null;
       wakeModeRef.current = true;
       setStatusNow("wake");
+      // Nothing more was said: the conversation is over — remember it.
+      consolidateConversation();
     }, FOLLOW_UP_WINDOW_MS);
-  }, [clearFollowUpTimer, resumeListening, setStatusNow]);
+  }, [clearFollowUpTimer, resumeListening, setStatusNow, consolidateConversation]);
+
+  useEffect(() => {
+    const onHide = () => consolidateConversation(true);
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, [consolidateConversation]);
 
   /** Cuts off whatever ULTRON is doing: the request in flight and the voice. */
   const interrupt = useCallback(() => {
@@ -195,7 +232,7 @@ export default function VoiceAgent() {
         const res = await fetch("/api/agent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: messagesRef.current, resolution }),
+          body: JSON.stringify({ messages: messagesRef.current, resolution, signals: resolution ? undefined : signalsRef.current }),
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {
@@ -209,12 +246,16 @@ export default function VoiceAgent() {
             for (const chunk of chunker.push(event.text)) speakChunk(chunk);
           } else if (event.type === "action") {
             pushLog("action", describeAction(event.action));
+            transcriptRef.current.push({ role: "assistant", content: `(${event.action.status}: ${event.action.name})` });
           } else if (event.type === "error") {
             throw new Error(event.error);
           } else if (event.type === "done") {
             speakChunk(chunker.flush());
             messagesRef.current = event.messages;
-            if (event.reply) pushLog("agent", stripSpeechMarkup(event.reply));
+            if (event.reply) {
+              pushLog("agent", stripSpeechMarkup(event.reply));
+              transcriptRef.current.push({ role: "assistant", content: stripSpeechMarkup(event.reply) });
+            }
             finalPending = event.pending;
             setPending(event.pending);
           }
@@ -247,14 +288,25 @@ export default function VoiceAgent() {
   );
 
   const handleUtterance = useCallback(
-    (text: string) => {
+    (text: string, measured: { wordsPerSecond?: number } = {}) => {
       const trimmed = text.trim();
       if (!trimmed) return;
+      const p = playerRef.current;
+      signalsRef.current = {
+        ...(measured.wordsPerSecond ? { wordsPerSecond: Math.round(measured.wordsPerSecond * 10) / 10 } : {}),
+        ...(interruptedRef.current ? { interruptedLastReply: true } : {}),
+        ...(isRepeatOf(trimmed, lastUtteranceRef.current) ? { repeatedRequest: true } : {}),
+        ...(p && Date.now() - p.lastActiveAt < 1500 ? { quickFollowUp: true } : {}),
+      };
+      interruptedRef.current = false;
+      lastUtteranceRef.current = trimmed;
+      transcriptRef.current.push({ role: "user", content: trimmed });
+      if (transcriptRef.current.length > 40) consolidateConversation(); // very long session: save as we go
       pushLog("user", trimmed);
       messagesRef.current = [...messagesRef.current, { role: "user", content: trimmed }];
       void callAgent();
     },
-    [callAgent, pushLog],
+    [callAgent, pushLog, consolidateConversation],
   );
 
   // Reminders are announced only when ULTRON is idle, so they never talk
@@ -267,7 +319,8 @@ export default function VoiceAgent() {
       handleUtterance("Give me my morning briefing.");
       return;
     }
-    const line = due.kind === "timer" ? `Sir, your ${due.text} timer is done.` : `Sir, a reminder: ${due.text}.`;
+    const line =
+      due.kind === "timer" ? `Sir, your ${due.text} timer is done.` : due.kind === "notice" ? due.text : `Sir, a reminder: ${due.text}.`;
     pushLog("agent", line);
     if (mutedRef.current) return;
     const turn = ++turnRef.current;
@@ -335,12 +388,18 @@ export default function VoiceAgent() {
       }
       const s = statusRef.current;
       const busy = s === "thinking" || s === "speaking";
+      if (utteranceStartRef.current === null) utteranceStartRef.current = performance.now();
       if (!finalText) {
         // While ULTRON talks the mic mostly hears ULTRON — don't show it.
         if (!busy) setInterim(interimText);
         return;
       }
       setInterim("");
+      // Speaking pace from the first partial result to the final one.
+      const seconds = (performance.now() - (utteranceStartRef.current ?? performance.now())) / 1000;
+      utteranceStartRef.current = null;
+      const wordCount = finalText.trim().split(/\s+/).length;
+      const measured = seconds > 0.8 && wordCount >= 4 ? { wordsPerSecond: wordCount / seconds } : {};
       if (s === "confirm") return;
 
       // Barge-in: while ULTRON is thinking or talking, the mic stays on but
@@ -349,6 +408,7 @@ export default function VoiceAgent() {
       if (busy) {
         if (isStopCommand(finalText)) {
           interrupt();
+          interruptedRef.current = true;
           pushLog("user", finalText.trim());
           goIdle();
           return;
@@ -356,7 +416,8 @@ export default function VoiceAgent() {
         const command = leadingWakeCommand(finalText);
         if (command === null) return;
         interrupt();
-        if (command) handleUtterance(command);
+        interruptedRef.current = true;
+        if (command) handleUtterance(command, measured);
         else armFollowUpWindow();
         return;
       }
@@ -368,7 +429,7 @@ export default function VoiceAgent() {
         const remainder = detectWake(finalText);
         if (remainder === null) return; // no wake word — stay passively listening
         if (remainder) {
-          handleUtterance(remainder);
+          handleUtterance(remainder, measured);
         } else {
           wakeModeRef.current = false;
           setStatusNow("listening");
@@ -384,7 +445,7 @@ export default function VoiceAgent() {
         }
         clearFollowUpTimer();
         wakeModeRef.current = true;
-        handleUtterance(command);
+        handleUtterance(command, measured);
       }
     };
 

@@ -21,6 +21,8 @@ import { analyzeCsv } from "./dataAnalysis";
 import { saveVocab, vocabQuiz, vocabResult, vocabSummary } from "./vocabTools";
 import { setTimer, setReminder, listReminders, cancelReminder, setDailyBriefing } from "./reminders";
 import { morningBriefing } from "./briefing";
+import { searchEpisodes } from "./episodes";
+import { setProactive } from "./proactive";
 import { getWeather } from "./weather";
 import { lookAtScreen } from "./screen";
 import { setVolume, mediaControl, lockPc, setBrightness, powerAction, cancelShutdown } from "./pcControls";
@@ -93,7 +95,9 @@ export type ToolName =
   | "power_action"
   | "cancel_shutdown"
   | "scan_disk_junk"
-  | "clean_disk_junk";
+  | "clean_disk_junk"
+  | "recall_conversations"
+  | "set_proactive";
 
 /** Tools in here run immediately. Anything not listed requires the user to
  *  click "Confirm" in the UI before it executes. */
@@ -158,6 +162,8 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "set_brightness",
   "cancel_shutdown",
   "scan_disk_junk",
+  "recall_conversations",
+  "set_proactive",
   // power_action and clean_disk_junk deliberately need confirmation.
 ]);
 
@@ -832,6 +838,27 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "recall_conversations",
+    description: "Search summaries of past conversations with the user (beyond the few recent ones already in your instructions). Use when they refer back to something ('what did we decide about…', 'that thing I mentioned last week').",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Keywords to look for" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "set_proactive",
+    description: "Turn ULTRON's unprompted notices (meeting starting soon, important email, low disk, rain soon) on or off, or change the quiet hours when it never speaks up.",
+    input_schema: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+        quiet_hours: { type: "string", description: "Like 22:00-07:00, or 'off' for no quiet hours" },
+      },
+      required: [],
+    },
+  },
+  {
     name: "call_health_report",
     description:
       "Place a real phone call (via Twilio) to the user's phone number and read out a spoken summary of this PC's health — disk space, memory, CPU load, and recent system errors — plus any important unread Gmail messages. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and USER_PHONE_NUMBER to be set in .env.local. This places a real, billed phone call, so it always requires the user's explicit confirmation before it runs.",
@@ -1004,6 +1031,13 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
       return scanDiskJunk();
     case "clean_disk_junk":
       return cleanDiskJunk(Array.isArray(input.categories) ? input.categories.map(String) : [String(input.categories ?? "")]);
+    case "recall_conversations":
+      return searchEpisodes(String(input.query ?? ""));
+    case "set_proactive":
+      return setProactive(
+        typeof input.enabled === "boolean" ? input.enabled : input.enabled === "true" ? true : input.enabled === "false" ? false : undefined,
+        input.quiet_hours !== undefined ? String(input.quiet_hours) : undefined,
+      );
     case "call_health_report":
       return placeHealthReportCall();
     case "spotify_play":

@@ -3,9 +3,40 @@ import { AUTO_EXECUTE, TOOLS, executeTool, type ToolName, type ToolOutput } from
 import { stashPendingAction, takePendingAction, type PendingToolUse } from "./pendingActions";
 import { repairToolPairs, stripImages, trimHistory } from "./conversationHistory";
 
-// Sonnet: this is a voice assistant, so time-to-first-word matters more
-// than the extra depth of a larger model.
+// Sonnet answers everything, because for a voice assistant time-to-first-
+// word matters. For genuinely hard questions it consults Opus 5 through the
+// advisor tool (server-side: one request, Opus plans, Sonnet speaks), so
+// quick commands stay fast and only hard questions pay for the bigger model.
 export const MODEL = "claude-sonnet-5";
+export const ADVISOR_MODEL = "claude-opus-5";
+const ADVISOR_BETA = "advisor-tool-2026-03-01";
+const ADVISOR_TOOL: Anthropic.Beta.Messages.BetaAdvisorTool20260301 = {
+  type: "advisor_20260301",
+  name: "advisor",
+  model: ADVISOR_MODEL,
+  max_uses: 2,
+  max_tokens: 8000,
+  caching: { type: "ephemeral", ttl: "5m" },
+};
+
+// Set when the API rejects the advisor (e.g. the beta isn't enabled for this
+// API key) so every later request goes straight to plain Sonnet.
+let advisorUnavailable = false;
+function advisorWanted(): boolean {
+  return process.env.ULTRON_ADVISOR !== "off" && !advisorUnavailable;
+}
+/** Test hook. */
+export function resetAdvisorState(): void {
+  advisorUnavailable = false;
+}
+
+// Once the history holds advisor results the tool must stay in the request,
+// or the API rejects the whole conversation.
+function historyUsesAdvisor(messages: Anthropic.MessageParam[]): boolean {
+  return messages.some(
+    (m) => m.role === "assistant" && Array.isArray(m.content) && m.content.some((b) => (b.type as string) === "advisor_tool_result"),
+  );
+}
 const MAX_ITERATIONS = 6;
 // Long enough for write_file drafts (meal plans, marketing copy).
 const MAX_TOKENS = 4096;
@@ -45,7 +76,7 @@ export type AgentStart =
   | { resolution: { token: string; approved: boolean } };
 
 export interface AgentDeps {
-  client: Pick<Anthropic, "messages">;
+  client: Pick<Anthropic, "beta">;
   system: Anthropic.TextBlockParam[];
   /** Overridable for tests. */
   execute?: (name: ToolName, input: Record<string, unknown>) => Promise<ToolOutput>;
@@ -134,18 +165,20 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
   });
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    let response: Anthropic.Message;
+    let response: Anthropic.Beta.Messages.BetaMessage;
+    const useAdvisor = advisorWanted() || historyUsesAdvisor(working);
     try {
-      const stream = deps.client.messages.stream(
+      const stream = deps.client.beta.messages.stream(
         {
           model: MODEL,
           max_tokens: MAX_TOKENS,
           system: deps.system,
-          tools: CACHED_TOOLS,
+          tools: useAdvisor ? [...CACHED_TOOLS, ADVISOR_TOOL] : CACHED_TOOLS,
           // Caches the conversation so far, so each step of a multi-tool
           // turn only pays full price for what's new.
           cache_control: { type: "ephemeral" },
-          messages: working,
+          messages: working as Anthropic.Beta.Messages.BetaMessageParam[],
+          ...(useAdvisor ? { betas: [ADVISOR_BETA] } : {}),
         },
         { signal: deps.signal },
       );
@@ -164,11 +197,25 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
       response = await stream.finalMessage();
     } catch (err) {
       if (deps.signal?.aborted) return; // the user said "stop" — nothing to report
+      const status = (err as { status?: number }).status;
+      if (useAdvisor && status === 400 && /advisor/i.test(errorMessage(err)) && !historyUsesAdvisor(working)) {
+        advisorUnavailable = true; // retry this step without it
+        i--;
+        continue;
+      }
       yield { type: "error", error: errorMessage(err) };
       return;
     }
 
-    working.push({ role: "assistant", content: response.content });
+    if (response.content.some((b) => b.type === "advisor_tool_result")) {
+      yield { type: "action", action: { name: "deep_thinking", input: {}, output: `Consulted ${ADVISOR_MODEL}.`, status: "done" } };
+    }
+
+    working.push({ role: "assistant", content: response.content as Anthropic.ContentBlockParam[] });
+
+    // A long server-side step (the advisor) can pause the turn; sending the
+    // conversation back as-is lets it carry on where it stopped.
+    if (response.stop_reason === "pause_turn") continue;
 
     if (response.stop_reason === "refusal") {
       if (!spoken.trim()) {
@@ -180,7 +227,7 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
       return;
     }
 
-    const toolUseBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+    const toolUseBlocks = response.content.filter((b): b is Anthropic.Beta.Messages.BetaToolUseBlock => b.type === "tool_use");
     if (response.stop_reason !== "tool_use" || toolUseBlocks.length === 0) {
       // A tool call cut off at max_tokens is incomplete — never run it. The
       // next request's history repair answers it as "not run".
@@ -191,7 +238,7 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
     // A tool name the model made up must not reach the confirm modal —
     // the user would be asked to approve something that can't run.
     const readyResults: ReadyResult[] = [];
-    const confirmBlocks: Anthropic.ToolUseBlock[] = [];
+    const confirmBlocks: Anthropic.Beta.Messages.BetaToolUseBlock[] = [];
     for (const b of toolUseBlocks) {
       const input = b.input as Record<string, unknown>;
       if (!KNOWN_TOOLS.has(b.name)) {

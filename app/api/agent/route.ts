@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { recallMemoryForPrompt } from "@/lib/agent/memory";
 import { runAgent, type AgentStart } from "@/lib/agent/runAgent";
 import { buildSystemBlocks } from "@/lib/agent/systemPrompt";
+import { recentEpisodesForPrompt } from "@/lib/agent/episodes";
+import { describeSignals, parseSignals } from "@/lib/agent/signals";
 
 export const runtime = "nodejs";
 
@@ -30,7 +32,10 @@ export async function POST(req: Request) {
 
   const events = runAgent(start, {
     client: new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }),
-    system: buildSystemBlocks(await recallMemoryForPrompt()),
+    system: buildSystemBlocks(await recallMemoryForPrompt(), new Date(), {
+      recentConversations: await recentEpisodesForPrompt(),
+      speaking: describeSignals(parseSignals(body.signals)),
+    }),
     // Fires when the browser aborts the fetch (the user said "stop"), so we
     // stop paying for tokens nobody will hear.
     signal: req.signal,

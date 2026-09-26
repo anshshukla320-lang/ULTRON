@@ -57,3 +57,13 @@ export function looksLikeEcho(transcript: string, recentlySpoken: string): boole
   const overlap = heard.filter((w) => spoken.has(w)).length;
   return heard.length >= 2 && overlap / heard.length >= 0.7;
 }
+
+/** True when two requests are essentially the same words — the user
+ *  repeating themselves, usually because ULTRON got it wrong. */
+export function isRepeatOf(current: string, previous: string): boolean {
+  const a = words(current);
+  const b = new Set(words(previous));
+  if (a.length < 2 || b.size === 0) return false;
+  // People rephrase a little when repeating ("ten" -> "10", "... please").
+  return a.filter((w) => b.has(w)).length / Math.max(a.length, b.size) >= 0.6;
+}

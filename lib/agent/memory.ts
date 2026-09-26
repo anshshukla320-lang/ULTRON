@@ -65,3 +65,35 @@ export async function recallMemoryForPrompt(): Promise<string> {
     .map((e) => `- ${e.text}`)
     .join("\n");
 }
+
+function normalizeFact(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+}
+
+/** True when two facts say essentially the same thing (most words shared). */
+function sameFact(a: string, b: string): boolean {
+  const wa = new Set(normalizeFact(a));
+  const wb = normalizeFact(b);
+  if (wa.size === 0 || wb.length === 0) return a.trim().toLowerCase() === b.trim().toLowerCase();
+  const shared = wb.filter((w) => wa.has(w)).length;
+  return shared / Math.max(wa.size, wb.length) >= 0.8;
+}
+
+/** Saves facts learned automatically from a conversation, skipping any the
+ *  memory already holds. Returns how many were new. */
+export async function rememberNewFacts(facts: string[]): Promise<number> {
+  const entries = await readMemory();
+  let added = 0;
+  for (const raw of facts) {
+    const text = raw.trim();
+    if (!text || entries.some((e) => sameFact(e.text, text))) continue;
+    entries.push({ text, savedAt: new Date().toISOString() });
+    added++;
+  }
+  if (added) await writeMemory(entries.slice(-MAX_STORED_ENTRIES));
+  return added;
+}

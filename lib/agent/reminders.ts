@@ -17,7 +17,7 @@ export interface Reminder {
 
 export interface DueItem {
   id: string;
-  kind: "timer" | "reminder" | "briefing";
+  kind: "timer" | "reminder" | "briefing" | "notice";
   text: string;
 }
 

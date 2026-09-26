@@ -89,6 +89,7 @@ export async function listEmails(query = "", maxResults = 8): Promise<string> {
 }
 
 export interface EmailBrief {
+  id: string;
   from: string;
   subject: string;
 }
@@ -110,7 +111,7 @@ export async function listImportantUnread(maxResults = 5): Promise<EmailBrief[]>
         `/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
       );
       const headers = msg.payload?.headers;
-      return { from: shortSender(extractHeader(headers, "From")), subject: extractHeader(headers, "Subject") || "(no subject)" };
+      return { id, from: shortSender(extractHeader(headers, "From")), subject: extractHeader(headers, "Subject") || "(no subject)" };
     }),
   );
 }

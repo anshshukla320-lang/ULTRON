@@ -64,6 +64,24 @@ A few things to try:
 | "Volume to 30" / "Next track" / "Lock the PC" | PC and media controls |
 | "Free up some disk space" | Scans junk, deletes only what you approve |
 
+**How it gets smarter than a script:**
+
+- **Thinks harder when it matters.** Everyday requests are answered by a
+  fast model; genuinely hard questions are passed to a more capable one
+  (Claude Opus 5, via the API's advisor tool) before answering. Set
+  `ULTRON_ADVISOR=off` to disable.
+- **Remembers conversations.** When a conversation ends, it's summarized
+  and lasting facts about you are saved automatically, so ULTRON can pick
+  up threads later ("How did the interview go?"). Ask "what did we talk
+  about last week?" to search older ones.
+- **Speaks up on its own** — a meeting starting in 10 minutes, an
+  important email, low disk space, rain on the way — never between 22:00
+  and 07:00. "Stop the notifications" or "quiet hours 23:00 to 8:00"
+  changes that.
+- **Reads the room.** How fast you're talking, cutting it off, or repeating
+  yourself changes how it answers: shorter when you're rushed, owning the
+  mistake when you're frustrated, warmer when you're chatting.
+
 Anything risky (sending email, running code, installing apps, shutting
 down, deleting files) shows a confirm box first. Setup for keys and
 accounts is in `.env.example`.

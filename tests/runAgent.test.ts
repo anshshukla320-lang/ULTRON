@@ -2,24 +2,38 @@ import "./tempHome";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type Anthropic from "@anthropic-ai/sdk";
-import { runAgent, type AgentDeps, type AgentEvent, type AgentStart } from "../lib/agent/runAgent";
+import { runAgent, resetAdvisorState, ADVISOR_MODEL, type AgentDeps, type AgentEvent, type AgentStart } from "../lib/agent/runAgent";
 import type { ToolOutput } from "../lib/agent/tools";
 
 // A scripted stand-in for the Anthropic client: each call to
 // messages.stream() plays the next scripted response and records the request.
-type Scripted = { text?: string; tools?: [string, Record<string, unknown>][]; stop?: Anthropic.Message["stop_reason"] };
+type Scripted = {
+  text?: string;
+  tools?: [string, Record<string, unknown>][];
+  stop?: string;
+  advisor?: boolean; // include a server-side advisor consultation in the reply
+  fail?: { status: number; message: string };
+};
 
 function fakeClient(script: Scripted[]) {
   const requests: Record<string, unknown>[] = [];
   let n = 0;
   const client = {
-    messages: {
+    beta: { messages: {
       stream(body: Record<string, unknown>, opts?: { signal?: AbortSignal }) {
         requests.push(structuredClone(body));
         const step = script[Math.min(n++, script.length - 1)];
-        const content: Anthropic.ContentBlock[] = [];
-        if (step.text) content.push({ type: "text", text: step.text, citations: null } as Anthropic.TextBlock);
-        for (const [name, input] of step.tools ?? []) content.push({ type: "tool_use", id: `toolu_${n}_${name}`, name, input } as Anthropic.ToolUseBlock);
+        if (step.fail) {
+          const err = Object.assign(new Error(step.fail.message), { status: step.fail.status });
+          return { async *[Symbol.asyncIterator]() { throw err; }, finalMessage: async () => { throw err; } };
+        }
+        const content: Record<string, unknown>[] = [];
+        if (step.advisor) {
+          content.push({ type: "server_tool_use", id: `srvtoolu_${n}`, name: "advisor", input: {} });
+          content.push({ type: "advisor_tool_result", tool_use_id: `srvtoolu_${n}`, content: { type: "advisor_redacted_result", encrypted_content: "ENC", stop_reason: "end_turn" } });
+        }
+        if (step.text) content.push({ type: "text", text: step.text, citations: null });
+        for (const [name, input] of step.tools ?? []) content.push({ type: "tool_use", id: `toolu_${n}_${name}`, name, input });
         const message = {
           id: `msg_${n}`,
           type: "message",
@@ -41,7 +55,7 @@ function fakeClient(script: Scripted[]) {
           finalMessage: async () => message,
         };
       },
-    },
+    } },
   };
   return { client: client as unknown as AgentDeps["client"], requests };
 }
@@ -69,9 +83,10 @@ test("streams text in pieces and caches the prompt", async () => {
   const texts = events.filter((e) => e.type === "text");
   assert.ok(texts.length > 2, "text arrives in several chunks");
   assert.equal(done(events).reply, "Good morning, sir. All quiet.");
-  const req = requests[0] as { cache_control?: unknown; tools: { cache_control?: unknown }[]; system: unknown };
+  const req = requests[0] as { cache_control?: unknown; tools: { cache_control?: unknown; type?: string }[]; system: unknown };
   assert.deepEqual(req.cache_control, { type: "ephemeral" });
-  assert.deepEqual(req.tools.at(-1)?.cache_control, { type: "ephemeral" }, "tool list is cached");
+  const own = req.tools.filter((t) => t.type !== "advisor_20260301");
+  assert.deepEqual(own.at(-1)?.cache_control, { type: "ephemeral" }, "tool list is cached");
   assert.equal(req.tools.filter((t) => t.cache_control).length, 1);
 });
 
@@ -153,4 +168,42 @@ test("stopping mid-reply ends quietly", async () => {
     if (events.length === 2) controller.abort();
   }
   assert.ok(!events.some((e) => e.type === "error" || e.type === "done"));
+});
+
+test("the advisor is offered on every request and reported when used", async () => {
+  resetAdvisorState();
+  const { client, requests } = fakeClient([{ advisor: true, text: "Let me think that through, sir. Here's the plan." }]);
+  const events = await collect(user("plan my week"), { client, system, execute });
+  const req = requests[0] as { tools: { type?: string; model?: string }[]; betas?: string[] };
+  const advisor = req.tools.find((t) => t.type === "advisor_20260301");
+  assert.equal(advisor?.model, ADVISOR_MODEL);
+  assert.deepEqual(req.betas, ["advisor-tool-2026-03-01"]);
+  assert.ok(events.some((e) => e.type === "action" && e.action.name === "deep_thinking"));
+  assert.match(JSON.stringify(done(events).messages), /advisor_tool_result/, "advisor result kept in history");
+});
+
+test("if the advisor isn't available, it falls back to plain Sonnet and stays off", async () => {
+  resetAdvisorState();
+  const { client, requests } = fakeClient([
+    { fail: { status: 400, message: "advisor tool is not enabled for this organization" } },
+    { text: "Hello, sir." },
+    { text: "Again." },
+  ]);
+  const first = await collect(user("hi"), { client, system, execute });
+  assert.equal(done(first).reply, "Hello, sir.");
+  assert.equal(requests.length, 2, "retried once");
+  assert.ok(!JSON.stringify(requests[1]).includes("advisor_20260301"));
+  await collect(user("hi again"), { client, system, execute });
+  assert.ok(!JSON.stringify(requests[2]).includes("advisor_20260301"), "stays off afterwards");
+  resetAdvisorState();
+});
+
+test("a paused turn is continued, not treated as finished", async () => {
+  resetAdvisorState();
+  const { client, requests } = fakeClient([{ advisor: true, stop: "pause_turn" }, { text: "Considered answer." }]);
+  const d = done(await collect(user("hard question"), { client, system, execute }));
+  assert.equal(requests.length, 2);
+  assert.equal(d.reply, "Considered answer.");
+  const second = requests[1] as { messages: { role: string }[] };
+  assert.equal(second.messages.at(-1)!.role, "assistant", "resent as-is so it can carry on");
 });

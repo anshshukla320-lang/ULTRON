@@ -120,3 +120,28 @@ export async function getWeather(location?: string): Promise<string> {
   }
   return lines.join("\n");
 }
+
+/** Hour of the first likely rain (≥60% chance) in the next few hours at the
+ *  user's home location, or null. For proactive "take an umbrella" notices. */
+export async function rainExpectedSoon(hoursAhead = 3, location = process.env.ULTRON_HOME_LOCATION): Promise<{ at: Date; chance: number } | null> {
+  if (!location?.trim()) return null;
+  const geo = await geocode(location);
+  const params = new URLSearchParams({
+    latitude: String(geo.latitude),
+    longitude: String(geo.longitude),
+    hourly: "precipitation_probability",
+    forecast_hours: String(hoursAhead + 1),
+    timezone: "auto",
+  });
+  const f = await getJson<{ hourly?: { time: string[]; precipitation_probability: (number | null)[] } }>(
+    `https://api.open-meteo.com/v1/forecast?${params.toString()}`,
+  );
+  const h = f.hourly;
+  if (!h) return null;
+  for (let i = 0; i < h.time.length; i++) {
+    const chance = h.precipitation_probability[i] ?? 0;
+    // Open-Meteo returns local times without an offset; the hour is what matters.
+    if (chance >= 60) return { at: new Date(h.time[i]), chance };
+  }
+  return null;
+}

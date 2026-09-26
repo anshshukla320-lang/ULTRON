@@ -39,6 +39,24 @@ export async function listUpcomingEvents(maxResults = 10): Promise<string> {
   return items.map(formatEvent).join("\n");
 }
 
+/** Timed (not all-day) events starting within the next `minutes`, for
+ *  proactive "your meeting starts soon" notices. */
+export async function eventsStartingWithin(minutes: number): Promise<{ id: string; summary: string; start: Date }[]> {
+  const now = new Date();
+  const params = new URLSearchParams({
+    maxResults: "10",
+    singleEvents: "true",
+    orderBy: "startTime",
+    timeMin: now.toISOString(),
+    timeMax: new Date(now.getTime() + minutes * 60_000).toISOString(),
+  });
+  const data = await calendarFetch<{ items?: CalendarEvent[] }>(`/calendars/primary/events?${params.toString()}`);
+  return (data.items ?? [])
+    .filter((e) => e.start?.dateTime)
+    .map((e) => ({ id: e.id, summary: e.summary ?? "an untitled event", start: new Date(e.start!.dateTime!) }))
+    .filter((e) => e.start.getTime() >= now.getTime());
+}
+
 /** The rest of today's events (for the morning briefing). */
 export async function listTodaysEvents(): Promise<string> {
   const endOfDay = new Date();
