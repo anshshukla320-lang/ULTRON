@@ -67,7 +67,7 @@ async function getJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function geocode(place: string): Promise<GeoResult> {
+export async function geocode(place: string): Promise<GeoResult> {
   // Open-Meteo's geocoder matches a place name only — "Pune, India" finds
   // nothing — so search the first part and use the rest to pick a match.
   const [name, ...qualifiers] = place.split(",").map((p) => p.trim()).filter(Boolean);

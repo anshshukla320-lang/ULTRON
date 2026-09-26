@@ -25,7 +25,12 @@ function isCrossSite(req: NextRequest): boolean {
   const origin = req.headers.get("origin");
   if (!origin) return false; // non-browser client (curl, Twilio) — no ambient cookies to abuse
   try {
-    return new URL(origin).host !== req.headers.get("host");
+    // Behind a reverse proxy (Tailscale Serve, a tunnel) the Host header can
+    // be the local address while the browser's Origin is the public name;
+    // X-Forwarded-Host carries that name. A cross-site page can't set it —
+    // it isn't a CORS-safe header, so the browser would preflight and fail.
+    const host = new URL(origin).host;
+    return host !== req.headers.get("host") && host !== req.headers.get("x-forwarded-host");
   } catch {
     return true; // "null" origin (sandboxed iframe, file://)
   }
@@ -66,5 +71,7 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg).*)"],
+  // The web-app manifest and its icons are fetched without cookies, so they
+  // must load before login for "Add to Home screen" to work.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|icons/).*)"],
 };

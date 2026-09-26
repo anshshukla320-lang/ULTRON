@@ -12,11 +12,13 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
     "@mediapipe/tasks-vision": "^0.10.35",
+    "mammoth": "^1.12.3",
     "next": "^16.3.5",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "three": "^0.185.1",
-    "twilio": "^6.1.1"
+    "twilio": "^6.1.1",
+    "unpdf": "^1.8.1"
   },
   "devDependencies": {
     "@types/node": "^24",
@@ -25,5 +27,8 @@
     "@types/three": "^0.185.0",
     "tsx": "^4.23.15",
     "typescript": "^5"
+  },
+  "optionalDependencies": {
+    "sherpa-onnx-node": "^1.13.8"
   }
 }

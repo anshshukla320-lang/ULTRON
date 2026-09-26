@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getSettings } from "./settings";
 
 // Local, offline neural TTS (https://github.com/rhasspy/piper) — genuinely
 // free forever, no API key, no per-character cost, no internet required
@@ -19,8 +20,18 @@ const QUALITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2, x_low
 
 /** Returns the voice model for a language code ("es", "pt-BR"), the default
  *  English voice when no code is given, or null if none is installed. */
-export async function findVoiceModel(lang?: string): Promise<string | null> {
+export async function findVoiceModel(lang?: string, preferred?: string): Promise<string | null> {
   if (!lang) {
+    // The voice chosen in Settings, if it's installed.
+    if (preferred) {
+      const chosen = path.join(PIPER_DIR, `${preferred}.onnx`);
+      try {
+        await fs.access(chosen);
+        return chosen;
+      } catch {
+        // not installed (any more) — fall back to the default
+      }
+    }
     try {
       await fs.access(DEFAULT_VOICE_MODEL);
       return DEFAULT_VOICE_MODEL;
@@ -46,22 +57,40 @@ export async function findVoiceModel(lang?: string): Promise<string | null> {
   return candidates.length ? path.join(PIPER_DIR, candidates[0].f) : null;
 }
 
+/** Installed voices for ULTRON's own (English) speech, e.g. "en_GB-alan-medium". */
+export async function listEnglishVoices(): Promise<string[]> {
+  try {
+    return (await fs.readdir(PIPER_DIR))
+      .filter((f) => /^en_[A-Z]{2}-.+\.onnx$/.test(f))
+      .map((f) => f.slice(0, -".onnx".length))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
 export async function isPiperAvailable(lang?: string): Promise<boolean> {
   try {
     await fs.access(PIPER_EXE);
   } catch {
     return false;
   }
-  return (await findVoiceModel(lang)) !== null;
+  return (await findVoiceModel(lang, lang ? undefined : (await getSettings()).voice)) !== null;
+}
+
+/** Piper's length_scale is time per phoneme: 1/speed. */
+export function lengthScaleFor(speed: number): string {
+  return (1 / Math.min(1.5, Math.max(0.7, speed || 1))).toFixed(2);
 }
 
 export async function synthesizeWithPiper(text: string, lang?: string): Promise<Buffer> {
-  const voiceModel = await findVoiceModel(lang);
+  const settings = await getSettings();
+  const voiceModel = await findVoiceModel(lang, settings.voice);
   if (!voiceModel) throw new Error(`No Piper voice installed for ${lang ?? "English"}.`);
   const outFile = path.join(os.tmpdir(), `ultron-tts-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`);
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(PIPER_EXE, ["--model", voiceModel, "--output_file", outFile]);
+    const child = spawn(PIPER_EXE, ["--model", voiceModel, "--output_file", outFile, "--length_scale", lengthScaleFor(settings.voiceSpeed)]);
     let stderr = "";
     child.stderr?.on("data", (d) => {
       stderr += d.toString();

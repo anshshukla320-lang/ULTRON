@@ -26,6 +26,8 @@ export class SpeechPlayer {
   /** Recent speech, for telling the mic's echo of it apart from the user. */
   lastSpoken = "";
   lastActiveAt = 0;
+  /** Speaking speed from Settings (used for the browser's fallback voice). */
+  rate = 1;
 
   enqueue(text: string): void {
     const segments = parseSpeechSegments(text);
@@ -101,7 +103,7 @@ export class SpeechPlayer {
       if (segment.lang) {
         utter.lang = segment.lang;
       } else {
-        utter.rate = 1.02;
+        utter.rate = 1.02 * this.rate;
         utter.pitch = 0.85;
       }
       utter.onend = done;

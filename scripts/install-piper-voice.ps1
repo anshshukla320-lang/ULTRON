@@ -3,7 +3,11 @@
 # English one in ~/.ultron/piper/piper/ and are picked up automatically by
 # language code — no restart or config needed.
 #
+# Also installs other English voices for ULTRON itself (jarvis, butler,
+# us-male, us-female, uk-female, narrator) — choose them under Settings > Voice.
+#
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\install-piper-voice.ps1 es
+#         powershell -ExecutionPolicy Bypass -File scripts\install-piper-voice.ps1 butler
 #         powershell -ExecutionPolicy Bypass -File scripts\install-piper-voice.ps1 fr_FR-siwis-medium
 #
 # Pass a language code to get the recommended voice below, or any full voice
@@ -30,6 +34,13 @@ $Recommended = @{
   "ar"    = "ar_JO-kareem-medium"
   "tr"    = "tr_TR-dfki-medium"
   "pl"    = "pl_PL-gosia-medium"
+  # Other voices for ULTRON itself — pick one under Settings > Voice.
+  "jarvis"    = "en_GB-alan-medium"
+  "butler"    = "en_GB-northern_english_male-medium"
+  "us-male"   = "en_US-ryan-high"
+  "us-female" = "en_US-lessac-high"
+  "uk-female" = "en_GB-cori-high"
+  "narrator"  = "en_US-joe-medium"
 }
 if ($Recommended.ContainsKey($Voice)) { $Voice = $Recommended[$Voice] }
 
@@ -49,4 +60,8 @@ foreach ($ext in ".onnx", ".onnx.json") {
   Write-Host "Downloading $Voice$ext ..."
   Invoke-WebRequest -Uri "$Base$ext" -OutFile $dest -UseBasicParsing
 }
-Write-Host "Installed $Voice. Ultron will now use it for that language."
+if ($Voice -like "en_*") {
+  Write-Host "Installed $Voice. Choose it under Settings > Voice in ULTRON."
+} else {
+  Write-Host "Installed $Voice. Ultron will now use it for that language."
+}

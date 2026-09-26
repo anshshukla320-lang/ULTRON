@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { isPiperAvailable, synthesizeWithPiper } from "@/lib/agent/piperTts";
+import { isPiperAvailable, listEnglishVoices, synthesizeWithPiper } from "@/lib/agent/piperTts";
+import { getSettings } from "@/lib/agent/settings";
 
 export const runtime = "nodejs";
 
@@ -21,13 +22,25 @@ async function tryElevenLabs(text: string, lang?: string): Promise<NextResponse 
       // Turbo v2.5 is multilingual; the hint keeps a short phrase from
       // being read with an English accent.
       ...(lang ? { language_code: lang.slice(0, 2).toLowerCase() } : {}),
-      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: Math.min(1.2, Math.max(0.7, (await getSettings()).voiceSpeed)) },
     }),
   });
   if (!res.ok) return null;
 
   const audio = await res.arrayBuffer();
   return new NextResponse(audio, { headers: { "Content-Type": "audio/mpeg" } });
+}
+
+/** Voices the page and Settings can offer, and the current choice. */
+export async function GET() {
+  const settings = await getSettings();
+  return NextResponse.json({
+    voices: await listEnglishVoices(),
+    voice: settings.voice,
+    speed: settings.voiceSpeed,
+    piper: await isPiperAvailable(),
+    elevenLabs: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID),
+  });
 }
 
 export async function POST(req: Request) {

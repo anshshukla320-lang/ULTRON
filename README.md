@@ -82,9 +82,118 @@ A few things to try:
   yourself changes how it answers: shorter when you're rushed, owning the
   mistake when you're frustrated, warmer when you're chatting.
 
+**More it can do:**
+
+- **Runs in the background.** `scripts\ultron-background.ps1` starts ULTRON
+  hidden with a tray icon; `scripts\install-startup.ps1` makes it start
+  with Windows. Reminders, notices and the briefing then arrive as Windows
+  notifications and are spoken even with no browser tab open.
+- **Uses the computer for you.** "Fill in this form", "rename these files" —
+  it looks at the screen and clicks and types (Claude computer use). Every
+  task asks first; say "stop" or push the mouse into the top-left corner to
+  halt it. It won't enter passwords or payment details, buy, send or delete.
+- **Settings page** (`/settings`): what it remembers about you, past
+  conversations, reminders, feature switches, quiet hours, and what it
+  spends on the Claude API each day (with an optional daily cap).
+- **Your documents.** "What does my lease say about notice?" searches PDFs,
+  Word and text files in the workspace and any folders listed in
+  `ULTRON_DOCUMENT_FOLDERS`.
+- **Messaging.** "Tell Priya I'm running late on WhatsApp" (WhatsApp desktop,
+  confirmed first). Text ULTRON from your phone through a Telegram bot.
+- **Smart home.** "Turn off the bedroom light", "dim it to 30", "make it
+  blue", "switch the fan on", "turn on the TV and open YouTube", "TV volume
+  down". Smart Life / Tuya lights and plugs, Android / Google TVs, and Home
+  Assistant; locks, alarms and garage doors need confirmation. Setup below.
+- **Better hearing.** `scripts\install-whisper.ps1`, then Settings >
+  Hearing > Whisper: local, offline, more accurate, understands Hindi.
+
+- **Routines.** "When I say good night, turn off the lights and the TV and
+  put the PC to sleep" — then just say "good night". Routines can run on a
+  schedule too ("every night at 11:30", "lights on at sunset"). A routine
+  that includes anything needing confirmation shows every step first.
+- **IR blaster.** A Smart Life IR blaster (about ₹1,000) copies your AC, fan
+  and TV remotes: "set the AC to 24", "fan speed up". Add the remotes to the
+  blaster in the Smart Life app; ULTRON finds them.
+- **Push-to-talk.** Press Ctrl+Shift+Space anywhere (change it in Settings)
+  and ULTRON listens — no wake word, even when minimised. It opens the page
+  if it isn't open.
+- **Offline wake word.** With local Whisper, "Hey ULTRON" is heard on your
+  PC by a small fast model — no Google, no internet.
+- **Voice lock.** Settings > "Only obey my voice": record three sentences
+  and ULTRON ignores other people, the TV and videos (needs local Whisper).
+- **Focus mode.** "Help me focus for an hour" — Pomodoro rounds, breaks
+  announced, and a nudge if YouTube or social media sneaks in. "How long was
+  I on YouTube today?" (screen time is kept on your PC, app names only).
+- **Live info.** Headlines, stock prices ("how's Reliance doing?", Nifty,
+  Sensex) and cricket scores — plus headlines and your watchlist in the
+  morning briefing.
+- **Bill reminders.** ULTRON checks Gmail daily for electricity, phone,
+  broadband and credit-card bills and reminds you two days before each is due.
+- **Clipboard.** Copy anything and say "summarise this", "translate this" or
+  "write a reply to this" — replies go back on the clipboard to paste.
+- **Webcam presence.** Settings > Webcam presence: ULTRON greets you when you
+  sit down and can lock the PC when you walk away. Face detection runs in
+  the browser; video never leaves the PC.
+- **Custom voice.** Settings > Voice: pick a voice and speed.
+  `scripts\install-piper-voice.ps1 butler` (or jarvis, us-male, us-female,
+  uk-female, narrator) adds more.
+- **Phone app.** Use ULTRON from your phone — see below.
+
 Anything risky (sending email, running code, installing apps, shutting
 down, deleting files) shows a confirm box first. Setup for keys and
 accounts is in `.env.example`.
+
+### Smart home setup
+
+**Smart Life lights and plugs** (Wipro, Syska, Halonix, Havells and other
+brands controlled from the Smart Life / Tuya app). About 10 minutes, once:
+
+1. Sign up at [iot.tuya.com](https://iot.tuya.com) (free).
+2. **Cloud > Development > Create Cloud Project.** Development method
+   *Smart Home*; data center *India* (the one your Smart Life account is in;
+   otherwise set `TUYA_REGION`, see `.env.example`). Keep the suggested API services
+   (IoT Core must be among them).
+3. Open the project, **Devices > Link App Account > Add App Account**, and scan
+   the QR code with the Smart Life app (Me > scan icon, top right). All your
+   app devices now appear in the project.
+4. From the project's **Overview**, copy the Access ID and Access Secret into
+   `.env.local` as `TUYA_ACCESS_ID` and `TUYA_ACCESS_SECRET`, then restart ULTRON.
+
+Tuya's free IoT Core plan has to be renewed every few months (free, one
+form on iot.tuya.com); ULTRON tells you when it has expired.
+
+A **fan without Wi-Fi** can be controlled by plugging it into a Wi-Fi smart
+plug that works with Smart Life. Name the plug "Fan" in the app.
+
+**Android / Google TV** (Sony, Mi, TCL, OnePlus, Hisense, Vu...):
+
+1. On the TV: **Settings > Device Preferences > About**, press *Build* 7 times
+   to unlock Developer options. Then **Developer options > USB debugging** on
+   (and *Network debugging* / *ADB over network* if your TV has it).
+2. Find the TV's IP address under **Settings > Network**. Reserving that
+   address in your router's DHCP settings keeps it from changing.
+3. On the PC: `powershell -ExecutionPolicy Bypass -File scripts\install-adb.ps1 -Tv <TV-IP>`,
+   then accept **Allow debugging?** on the TV (tick *Always allow*).
+4. Put `ANDROID_TV_HOST=<TV-IP>` in `.env.local` and restart ULTRON.
+
+To switch the TV on from standby, turn on *network standby* / *remote start*
+in the TV's settings if it has it.
+
+### Phone app
+
+ULTRON installs on your phone like an app and uses the PC's brain, smart
+home and memory. The microphone only works over HTTPS, so the easiest way is
+[Tailscale](https://tailscale.com) (free), which also works away from home:
+
+1. Install Tailscale on the PC and the phone and sign in to both with the
+   same account.
+2. On the PC: `tailscale serve --bg 3000`. It prints an address like
+   `https://my-pc.tailnet-name.ts.net`.
+3. Open that address in Chrome on the phone, log in with your ULTRON
+   password, then menu > **Add to Home screen**.
+
+Only your own devices can reach it. Voice replies play on the phone; on the
+phone, webcam presence never locks the PC.
 
 ### Tests
 

@@ -6,7 +6,8 @@
  *  the wake phrase in the same utterance ("" if the wake word was said
  *  alone), or null if no wake word was heard at all. */
 export function detectWake(transcript: string): string | null {
-  const patterns = [/\b(hey|ok)[,]?\s+(ultron|altron)\b/i, /\bultron\b/i, /\baltron\b/i];
+  // Whisper writes the name in Devanagari when listening for Hindi.
+  const patterns = [/\b(hey|ok)[,]?\s+(ultron|altron)\b/i, /(हे|हाय|ओके)[,]?\s*(अल्ट्रॉन|अल्ट्रोन|अल्ट्रान)/, /\bultron\b/i, /\baltron\b/i, /अल्ट्रॉन|अल्ट्रोन|अल्ट्रान/];
   for (const pattern of patterns) {
     const match = transcript.match(pattern);
     if (match && match.index !== undefined) {
@@ -16,7 +17,7 @@ export function detectWake(transcript: string): string | null {
   return null;
 }
 
-const LEADING_WAKE = /^\s*(?:(?:hey|ok)[,]?\s+)?(?:ultron|altron)\b[,.!]?\s*/i;
+const LEADING_WAKE = /^\s*(?:(?:hey|ok|हे|हाय|ओके)[,]?\s*)?(?:ultron\b|altron\b|अल्ट्रॉन|अल्ट्रोन|अल्ट्रान)[,.!।]?\s*/i;
 
 /** Only a wake phrase at the *start* counts, so "tell me about the movie
  *  Ultron" stays intact. Returns the command after it, or null if the

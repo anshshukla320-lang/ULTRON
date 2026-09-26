@@ -31,4 +31,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Install Whisper (tiny model) with ULTRON's own installer
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-whisper.ps1 -Model tiny
+      - name: Install ADB (TV control) with ULTRON's own installer
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-adb.ps1
       - run: npx tsx scripts/windows-smoke.mts

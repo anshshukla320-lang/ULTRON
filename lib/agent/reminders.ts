@@ -9,7 +9,9 @@ import path from "node:path";
 
 export interface Reminder {
   id: string;
-  kind: "timer" | "reminder";
+  /** "notice" = something ULTRON wants to say as soon as possible (a scheduled
+   *  routine ran, bills were found); delivered like a reminder. */
+  kind: "timer" | "reminder" | "notice";
   text: string;
   dueAt: string; // ISO
   createdAt: string;
@@ -116,9 +118,16 @@ export async function setReminder(text: string, at?: string, inMinutes?: number)
   return `I'll remind you ${spokenTime(due)}: ${reminder.text}.`;
 }
 
+/** Queues something for ULTRON to say at the next chance (page poll or background). */
+export async function queueNotice(text: string): Promise<void> {
+  const now = new Date().toISOString();
+  await withStore((s) => void s.items.push({ id: randomUUID().slice(0, 8), kind: "notice", text, dueAt: now, createdAt: now }));
+}
+
 export async function listReminders(): Promise<string> {
   const store = await readStore();
-  const lines = [...store.items]
+  const lines = store.items
+    .filter((r) => r.kind !== "notice")
     .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
     .map((r) => {
       const left = new Date(r.dueAt).getTime() - Date.now();
@@ -176,7 +185,7 @@ export async function takeDue(now = new Date()): Promise<DueItem[]> {
         continue;
       }
       // Delivered late (app was closed): say when it was for.
-      const late = now.getTime() - dueAt.getTime() > 2 * 60_000;
+      const late = r.kind !== "notice" && now.getTime() - dueAt.getTime() > 2 * 60_000;
       due.push({ id: r.id, kind: r.kind, text: late ? `${r.text} (this was due ${spokenTime(dueAt)})` : r.text });
     }
     s.items = remaining;
@@ -194,4 +203,10 @@ export async function takeDue(now = new Date()): Promise<DueItem[]> {
     }
     return due;
   });
+}
+
+/** For the control panel. */
+export async function listRemindersRaw(): Promise<{ items: Reminder[]; briefingTime: string | null }> {
+  const s = await readStore();
+  return { items: [...s.items].sort((a, b) => a.dueAt.localeCompare(b.dueAt)), briefingTime: s.briefing?.time ?? null };
 }

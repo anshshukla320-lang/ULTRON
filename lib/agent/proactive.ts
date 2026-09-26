@@ -215,3 +215,9 @@ export async function setProactive(enabled?: boolean, quietHours?: string): Prom
     return `Proactive notices ${s.enabled ? "on" : "off"} (${quiet}).`;
   });
 }
+
+/** For the control panel. */
+export async function getProactiveState(): Promise<{ enabled: boolean; quietStart: string | null; quietEnd: string | null }> {
+  const s = await readState();
+  return { enabled: s.enabled, quietStart: s.quietStart, quietEnd: s.quietEnd };
+}

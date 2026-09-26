@@ -5,6 +5,8 @@ import { runAgent, type AgentStart } from "@/lib/agent/runAgent";
 import { buildSystemBlocks } from "@/lib/agent/systemPrompt";
 import { recentEpisodesForPrompt } from "@/lib/agent/episodes";
 import { describeSignals, parseSignals } from "@/lib/agent/signals";
+import { getSettings } from "@/lib/agent/settings";
+import { spentToday } from "@/lib/agent/usage";
 
 export const runtime = "nodejs";
 
@@ -26,6 +28,14 @@ export async function POST(req: Request) {
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Request body must be JSON." }, { status: 400 });
   }
+  const settings = await getSettings();
+  if (settings.dailyBudgetUsd > 0 && (await spentToday()) >= settings.dailyBudgetUsd) {
+    return NextResponse.json(
+      { error: `Today's Claude budget of $${settings.dailyBudgetUsd.toFixed(2)} is used up. Raise it in Settings to continue.` },
+      { status: 429 },
+    );
+  }
+
   const start: AgentStart = body.resolution?.token
     ? { resolution: { token: String(body.resolution.token), approved: body.resolution.approved === true } }
     : { messages: Array.isArray(body.messages) ? body.messages : [] };
@@ -39,6 +49,7 @@ export async function POST(req: Request) {
     // Fires when the browser aborts the fetch (the user said "stop"), so we
     // stop paying for tokens nobody will hear.
     signal: req.signal,
+    advisor: settings.advisor,
   });
 
   const encoder = new TextEncoder();
