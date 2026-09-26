@@ -5,18 +5,25 @@ import { deleteEpisode, listEpisodes } from "@/lib/agent/episodes";
 import { cancelReminder, listRemindersRaw, setDailyBriefing } from "@/lib/agent/reminders";
 import { getProactiveState, setProactive } from "@/lib/agent/proactive";
 import { usageSummary } from "@/lib/agent/usage";
+import { deleteRoutine, describeSchedule, listRoutinesRaw } from "@/lib/agent/routines";
+import { listEnglishVoices } from "@/lib/agent/piperTts";
+import { voiceIdStatus } from "@/lib/agent/voiceId";
+import { findWhisper } from "@/lib/agent/whisperStt";
 
 export const runtime = "nodejs";
 
 /** Everything the control panel shows, in one call. */
 async function snapshot() {
-  const [settings, facts, episodes, reminders, proactive, usage] = await Promise.all([
+  const [settings, facts, episodes, reminders, proactive, usage, voices, voiceId, whisper] = await Promise.all([
     getSettings(),
     listFacts(),
     listEpisodes(),
     listRemindersRaw(),
     getProactiveState(),
     usageSummary(),
+    listEnglishVoices(),
+    voiceIdStatus(),
+    findWhisper(),
   ]);
   return {
     settings,
@@ -25,6 +32,14 @@ async function snapshot() {
     reminders,
     proactive,
     usage,
+    routines: listRoutinesRaw().map((r) => ({
+      id: r.id,
+      name: r.name,
+      steps: r.steps.map((s) => s.tool.replace(/_/g, " ")),
+      schedule: r.schedule ? describeSchedule(r.schedule) : null,
+    })),
+    voices,
+    voiceId: { ...voiceId, whisperInstalled: Boolean(whisper) },
     integrations: {
       google: Boolean(process.env.GOOGLE_CLIENT_ID),
       homeAssistant: Boolean(process.env.HOME_ASSISTANT_URL && process.env.HOME_ASSISTANT_TOKEN),
@@ -48,7 +63,8 @@ type Action =
   | { action: "delete_episode"; id: string }
   | { action: "cancel_reminder"; id: string }
   | { action: "briefing"; time: string }
-  | { action: "proactive"; enabled?: boolean; quietHours?: string };
+  | { action: "proactive"; enabled?: boolean; quietHours?: string }
+  | { action: "delete_routine"; id: string };
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as Action | null;
@@ -78,6 +94,9 @@ export async function POST(req: Request) {
         break;
       case "proactive":
         await setProactive(body.enabled, body.quietHours);
+        break;
+      case "delete_routine":
+        await deleteRoutine(String(body.id ?? ""));
         break;
       default:
         return NextResponse.json({ error: "Unknown action." }, { status: 400 });

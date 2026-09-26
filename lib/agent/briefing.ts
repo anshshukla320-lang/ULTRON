@@ -3,6 +3,8 @@ import { listImportantUnread } from "./gmailClient";
 import { listTasks } from "./tasksClient";
 import { getWeather } from "./weather";
 import { listReminders } from "./reminders";
+import { getNews, getStockPrices } from "./liveInfo";
+import { getSettings } from "./settings";
 
 /**
  * Gathers everything for a spoken morning briefing in one tool call:
@@ -23,6 +25,9 @@ export async function morningBriefing(location?: string): Promise<string> {
     ["Open tasks", listTasks(10)],
     ["Timers and reminders", listReminders()],
   ];
+  const settings = await getSettings();
+  if (settings.newsInBriefing) sections.push(["Top headlines", getNews("", 4)]);
+  if (settings.stockWatchlist.length) sections.push(["Stocks the user follows", getStockPrices(settings.stockWatchlist.join(", "))]);
   const results = await Promise.allSettled(sections.map(([, p]) => p));
   return sections
     .map(([title], i) => {

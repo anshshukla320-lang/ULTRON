@@ -51,4 +51,12 @@ if (-not (Test-Path $modelFile)) {
   Invoke-WebRequest -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$Model.bin" -OutFile $modelFile -UseBasicParsing
 }
 
+# The tiny model listens for "Hey ULTRON" (fast, a fraction of a second per
+# phrase); the chosen model then transcribes the actual command.
+$wakeFile = Join-Path $dir "ggml-tiny.bin"
+if (-not (Test-Path $wakeFile)) {
+  Write-Host "Downloading the tiny model for the offline wake word..."
+  Invoke-WebRequest -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin" -OutFile $wakeFile -UseBasicParsing
+}
+
 Write-Host "Whisper is ready ($($exe.Name), $Model model). In ULTRON: Settings > Hearing > Whisper (local)."

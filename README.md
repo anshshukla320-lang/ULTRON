@@ -107,6 +107,38 @@ A few things to try:
 - **Better hearing.** `scripts\install-whisper.ps1`, then Settings >
   Hearing > Whisper: local, offline, more accurate, understands Hindi.
 
+- **Routines.** "When I say good night, turn off the lights and the TV and
+  put the PC to sleep" — then just say "good night". Routines can run on a
+  schedule too ("every night at 11:30", "lights on at sunset"). A routine
+  that includes anything needing confirmation shows every step first.
+- **IR blaster.** A Smart Life IR blaster (about ₹1,000) copies your AC, fan
+  and TV remotes: "set the AC to 24", "fan speed up". Add the remotes to the
+  blaster in the Smart Life app; ULTRON finds them.
+- **Push-to-talk.** Press Ctrl+Shift+Space anywhere (change it in Settings)
+  and ULTRON listens — no wake word, even when minimised. It opens the page
+  if it isn't open.
+- **Offline wake word.** With local Whisper, "Hey ULTRON" is heard on your
+  PC by a small fast model — no Google, no internet.
+- **Voice lock.** Settings > "Only obey my voice": record three sentences
+  and ULTRON ignores other people, the TV and videos (needs local Whisper).
+- **Focus mode.** "Help me focus for an hour" — Pomodoro rounds, breaks
+  announced, and a nudge if YouTube or social media sneaks in. "How long was
+  I on YouTube today?" (screen time is kept on your PC, app names only).
+- **Live info.** Headlines, stock prices ("how's Reliance doing?", Nifty,
+  Sensex) and cricket scores — plus headlines and your watchlist in the
+  morning briefing.
+- **Bill reminders.** ULTRON checks Gmail daily for electricity, phone,
+  broadband and credit-card bills and reminds you two days before each is due.
+- **Clipboard.** Copy anything and say "summarise this", "translate this" or
+  "write a reply to this" — replies go back on the clipboard to paste.
+- **Webcam presence.** Settings > Webcam presence: ULTRON greets you when you
+  sit down and can lock the PC when you walk away. Face detection runs in
+  the browser; video never leaves the PC.
+- **Custom voice.** Settings > Voice: pick a voice and speed.
+  `scripts\install-piper-voice.ps1 butler` (or jarvis, us-male, us-female,
+  uk-female, narrator) adds more.
+- **Phone app.** Use ULTRON from your phone — see below.
+
 Anything risky (sending email, running code, installing apps, shutting
 down, deleting files) shows a confirm box first. Setup for keys and
 accounts is in `.env.example`.
@@ -146,6 +178,22 @@ plug that works with Smart Life. Name the plug "Fan" in the app.
 
 To switch the TV on from standby, turn on *network standby* / *remote start*
 in the TV's settings if it has it.
+
+### Phone app
+
+ULTRON installs on your phone like an app and uses the PC's brain, smart
+home and memory. The microphone only works over HTTPS, so the easiest way is
+[Tailscale](https://tailscale.com) (free), which also works away from home:
+
+1. Install Tailscale on the PC and the phone and sign in to both with the
+   same account.
+2. On the PC: `tailscale serve --bg 3000`. It prints an address like
+   `https://my-pc.tailnet-name.ts.net`.
+3. Open that address in Chrome on the phone, log in with your ULTRON
+   password, then menu > **Add to Home screen**.
+
+Only your own devices can reach it. Voice replies play on the phone; on the
+phone, webcam presence never locks the PC.
 
 ### Tests
 

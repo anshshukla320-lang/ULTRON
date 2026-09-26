@@ -1,6 +1,7 @@
 import { controlDevice, controlSecurityDevice, haConfigured, listDevices } from "./homeAssistant";
 import { controlTuya, controlTuyaSecurity, listTuyaDevices, tuyaConfigured } from "./tuya";
 import { tvConfigured } from "./androidTv";
+import { listIrRemotes } from "./tuyaIr";
 
 // One set of smart-home tools over every place devices can live: Smart Life
 // (Tuya cloud) and Home Assistant. Device ids say which: "tuya:<id>" vs
@@ -29,7 +30,8 @@ export async function listSmartHome(query = ""): Promise<string> {
   if (tuyaConfigured()) {
     try {
       const lines = await listTuyaDevices(query);
-      if (lines.length) sections.push(lines.join("\n"));
+      const remotes = await listIrRemotes(query).catch(() => []);
+      if (lines.length || remotes.length) sections.push([...lines, ...remotes].join("\n"));
     } catch (err) {
       problems.push(`Smart Life: ${(err as Error).message}`);
     }

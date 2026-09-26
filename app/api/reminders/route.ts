@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { takeDue } from "@/lib/agent/reminders";
 import { checkProactive } from "@/lib/agent/proactive";
 import { markPageActive } from "@/lib/agent/presence";
+import { takeFocusDue } from "@/lib/agent/focus";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,6 @@ export const runtime = "nodejs";
 export async function POST() {
   // Tells the background loop a page is open, so it leaves announcing to it.
   await markPageActive();
-  const [due, notices] = await Promise.all([takeDue(), checkProactive().catch(() => [])]);
-  return NextResponse.json({ due: [...due, ...notices] });
+  const [due, notices, focus] = await Promise.all([takeDue(), checkProactive().catch(() => []), takeFocusDue().catch(() => [])]);
+  return NextResponse.json({ due: [...due, ...focus, ...notices] });
 }

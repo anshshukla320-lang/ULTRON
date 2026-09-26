@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { AUTO_EXECUTE, TOOLS, executeTool, type ToolName } from "./tools";
+import { TOOLS, executeTool, needsConfirmation, type ToolName } from "./tools";
 import { recallMemoryForPrompt } from "./memory";
 
 const MODEL = "claude-sonnet-5";
@@ -50,7 +50,7 @@ export async function runPhoneTurn(
     const toolUseBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
     const results: Anthropic.ToolResultBlockParam[] = [];
     for (const b of toolUseBlocks) {
-      if (!AUTO_EXECUTE.has(b.name as ToolName)) {
+      if (needsConfirmation(b.name, b.input as Record<string, unknown>)) {
         results.push({
           type: "tool_result",
           tool_use_id: b.id,

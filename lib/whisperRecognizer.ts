@@ -14,6 +14,11 @@ export class WhisperRecognizer {
   onresult: ((e: { resultIndex: number; results: ResultList }) => void) | null = null;
   onerror: ((e: { error: string }) => void) | null = null;
   onend: (() => void) | null = null;
+  /** Set by the page: "wake" while waiting for "Hey ULTRON" (the server
+   *  then checks with a small fast model first). */
+  getMode: (() => "wake" | "command") | null = null;
+  /** Voice lock turned an utterance away (not the owner's voice). */
+  onrejected: (() => void) | null = null;
 
   private running = false;
   private stream: MediaStream | null = null;
@@ -82,17 +87,19 @@ export class WhisperRecognizer {
     if (audio.length < 16000 * 0.35) return; // shorter than a word
     this.pending++;
     try {
-      const res = await fetch("/api/stt", {
+      const mode = this.getMode?.() ?? "command";
+      const res = await fetch(`/api/stt${mode === "wake" ? "?mode=wake" : ""}`, {
         method: "POST",
         headers: { "Content-Type": "audio/wav" },
         body: encodeWav(audio) as unknown as BodyInit,
       });
-      const data = (await res.json()) as { text?: string; error?: string };
+      const data = (await res.json()) as { text?: string; error?: string; rejected?: boolean };
       if (!res.ok) {
         this.onerror?.({ error: data.error ?? "transcription failed" });
         return;
       }
-      if (data.text && this.running) this.emit(data.text, true);
+      if (data.rejected) this.onrejected?.();
+      else if (data.text && this.running) this.emit(data.text, true);
     } catch {
       this.onerror?.({ error: "network" });
     } finally {

@@ -5,7 +5,7 @@ import path from "node:path";
 // Tracks what ULTRON spends on the Claude API: every response's token usage
 // is priced and appended to ~/.ultron/usage.jsonl.
 
-export type Feature = "chat" | "memory" | "computer" | "telegram" | "background";
+export type Feature = "chat" | "memory" | "computer" | "telegram" | "background" | "bills";
 
 // USD per million tokens (input, output). Cache writes cost 1.25x input
 // (5-minute TTL), cache reads 0.1x input.

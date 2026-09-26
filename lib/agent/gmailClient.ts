@@ -116,6 +116,13 @@ export async function listImportantUnread(maxResults = 5): Promise<EmailBrief[]>
   );
 }
 
+/** Message ids matching a Gmail search, newest first. */
+export async function searchEmailIds(query: string, maxResults = 10): Promise<string[]> {
+  const params = new URLSearchParams({ maxResults: String(Math.min(maxResults, 25)), q: query });
+  const listData = await gmailFetch<{ messages?: { id: string }[] }>(`/messages?${params.toString()}`);
+  return (listData.messages ?? []).map((m) => m.id);
+}
+
 export async function readEmail(id: string): Promise<string> {
   const msg = await gmailFetch<GmailMessage>(`/messages/${id}?format=full`);
   const headers = msg.payload?.headers;

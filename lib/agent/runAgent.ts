@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { AUTO_EXECUTE, TOOLS, executeTool, type ToolName, type ToolOutput } from "./tools";
+import { TOOLS, confirmationInput, executeTool, needsConfirmation, type ToolName, type ToolOutput } from "./tools";
 import { stashPendingAction, takePendingAction, type PendingToolUse } from "./pendingActions";
 import { repairToolPairs, stripImages, trimHistory } from "./conversationHistory";
 import { recordUsage, type Feature } from "./usage";
@@ -80,7 +80,7 @@ export interface AgentDeps {
   client: Pick<Anthropic, "beta">;
   system: Anthropic.TextBlockParam[];
   /** Overridable for tests. */
-  execute?: (name: ToolName, input: Record<string, unknown>, ctx?: { signal?: AbortSignal }) => Promise<ToolOutput>;
+  execute?: (name: ToolName, input: Record<string, unknown>, ctx?: { signal?: AbortSignal; confirmed?: boolean }) => Promise<ToolOutput>;
   signal?: AbortSignal;
   /** From the control panel; false never offers the advisor. */
   advisor?: boolean;
@@ -148,7 +148,7 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
         continue;
       }
       try {
-        const output = await execute(tu.name as ToolName, tu.input, { signal: deps.signal });
+        const output = await execute(tu.name as ToolName, tu.input, { signal: deps.signal, confirmed: true });
         blocks.push(toolResultBlock({ id: tu.id, output }));
         yield { type: "action", action: { name: tu.name, input: tu.input, output: outputText(output), status: "done" } };
       } catch (err) {
@@ -257,7 +257,7 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
         const msg = `There is no tool named "${b.name}".`;
         readyResults.push({ id: b.id, output: msg, isError: true });
         yield { type: "action", action: { name: b.name, input, output: msg, status: "error" } };
-      } else if (!AUTO_EXECUTE.has(b.name as ToolName)) {
+      } else if (needsConfirmation(b.name, input)) {
         confirmBlocks.push(b);
       } else {
         try {
@@ -274,7 +274,7 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
     }
 
     if (confirmBlocks.length > 0) {
-      const toolUse = confirmBlocks.map((b) => ({ id: b.id, name: b.name, input: b.input as Record<string, unknown> }));
+      const toolUse = confirmBlocks.map((b) => ({ id: b.id, name: b.name, input: confirmationInput(b.name, b.input as Record<string, unknown>) }));
       const token = stashPendingAction({ toolUse, readyResults, messages: working });
       // toolUse here is for the confirm modal to DISPLAY only — actually
       // executing it requires the token, which only the server can mint.

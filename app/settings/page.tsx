@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { downsample, encodeWav } from "@/lib/audio";
 
 interface Settings {
   advisor: boolean;
@@ -12,6 +13,17 @@ interface Settings {
   computerUse: boolean;
   telegramNotifications: boolean;
   dailyBudgetUsd: number;
+  voice: string;
+  voiceSpeed: number;
+  hotkey: string;
+  voiceLock: boolean;
+  voiceLockThreshold: number;
+  webcamPresence: boolean;
+  presenceLockMinutes: number;
+  screenTime: boolean;
+  stockWatchlist: string[];
+  newsInBriefing: boolean;
+  billReminders: boolean;
 }
 
 interface Snapshot {
@@ -28,6 +40,9 @@ interface Snapshot {
     byModel: Record<string, number>;
     cacheHitRate: number;
   };
+  routines: { id: string; name: string; steps: string[]; schedule: string | null }[];
+  voices: string[];
+  voiceId: { enrolled: boolean; clips: number; whisperInstalled: boolean };
   integrations: { google: boolean; homeAssistant: boolean; smartLife: boolean; tv: string | null; telegram: boolean; homeLocation: string | null };
 }
 
@@ -46,12 +61,46 @@ function Toggle({ label, hint, checked, onChange }: { label: string; hint?: stri
   );
 }
 
+const ENROLL_PHRASES = [
+  "Hey ULTRON, what's the weather like today and do I need an umbrella?",
+  "Turn off the lights in the bedroom and set an alarm for seven in the morning.",
+  "Remind me to call my mother this evening after I get back from work.",
+  "Play some relaxing music and lower the volume a little bit, please.",
+];
+
+/** Records a few seconds from the mic as a 16 kHz WAV (voice-lock enrollment). */
+async function recordClip(seconds: number): Promise<Uint8Array> {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+  const ctx = new AudioContext();
+  const source = ctx.createMediaStreamSource(stream);
+  const node = ctx.createScriptProcessor(4096, 1, 1);
+  const chunks: Float32Array[] = [];
+  node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  source.connect(node);
+  node.connect(ctx.destination);
+  await new Promise((r) => setTimeout(r, seconds * 1000));
+  node.disconnect();
+  stream.getTracks().forEach((t) => t.stop());
+  const rate = ctx.sampleRate;
+  await ctx.close();
+  const all = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
+  let off = 0;
+  for (const c of chunks) {
+    all.set(c, off);
+    off += c.length;
+  }
+  return encodeWav(downsample(all, rate));
+}
+
 export default function SettingsPage() {
   const [data, setData] = useState<Snapshot | null>(null);
   const [error, setError] = useState("");
   const [newFact, setNewFact] = useState("");
   const [quiet, setQuiet] = useState("");
   const [briefing, setBriefing] = useState("");
+  const [hotkey, setHotkey] = useState("");
+  const [stocks, setStocks] = useState("");
+  const [recording, setRecording] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/settings");
@@ -60,6 +109,8 @@ export default function SettingsPage() {
     setData(d);
     setQuiet(d.proactive.quietStart ? `${d.proactive.quietStart}-${d.proactive.quietEnd}` : "off");
     setBriefing(d.reminders.briefingTime ?? "");
+    setHotkey(d.settings.hotkey);
+    setStocks(d.settings.stockWatchlist.join(", "));
   }, []);
 
   useEffect(() => {
@@ -75,6 +126,39 @@ export default function SettingsPage() {
   }, []);
 
   const update = (patch: Partial<Settings>) => act({ action: "update", settings: patch });
+
+  const testVoice = async () => {
+    setError("");
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Good evening, sir. All systems are online and ready." }),
+    });
+    if (!res.ok) return setError("No voice engine answered — install Piper (see README).");
+    void new Audio(URL.createObjectURL(await res.blob())).play();
+  };
+
+  const enroll = async (reset = false) => {
+    setError("");
+    try {
+      if (reset) {
+        await fetch("/api/voiceid?action=reset", { method: "POST" });
+        await load();
+        return;
+      }
+      const phrase = ENROLL_PHRASES[(data?.voiceId.clips ?? 0) % ENROLL_PHRASES.length];
+      setRecording(phrase);
+      const wav = await recordClip(5);
+      setRecording(null);
+      const res = await fetch("/api/voiceid?action=enroll", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav as unknown as BodyInit });
+      const d = await res.json();
+      if (!res.ok) setError(d.error ?? "Couldn't use that recording.");
+      await load();
+    } catch (err) {
+      setRecording(null);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   if (!data) {
     return <main className="settings-page">{error || "Loading…"}</main>;
@@ -131,6 +215,117 @@ export default function SettingsPage() {
             <option value="auto">Auto / Hinglish (Whisper only)</option>
           </select>
         </label>
+      </section>
+
+      <section>
+        <h2>Voice</h2>
+        <label className="set-row">
+          <span>
+            ULTRON&apos;s voice
+            <small>More voices: scripts\install-piper-voice.ps1 butler (or jarvis, us-male, us-female, uk-female, narrator).</small>
+          </span>
+          <select value={s.voice} onChange={(e) => update({ voice: e.target.value })}>
+            <option value="">Default</option>
+            {data.voices.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="set-row">
+          <span>
+            Speaking speed <small>{s.voiceSpeed.toFixed(2)}×</small>
+          </span>
+          <input type="range" min={0.7} max={1.5} step={0.05} defaultValue={s.voiceSpeed} onMouseUp={(e) => update({ voiceSpeed: Number((e.target as HTMLInputElement).value) })} onTouchEnd={(e) => update({ voiceSpeed: Number((e.target as HTMLInputElement).value) })} onKeyUp={(e) => update({ voiceSpeed: Number((e.target as HTMLInputElement).value) })} />
+        </label>
+        <button className="hud-btn" onClick={() => void testVoice()}>
+          TEST VOICE
+        </button>
+      </section>
+
+      <section>
+        <h2>Push-to-talk &amp; voice lock</h2>
+        <label className="set-row">
+          <span>
+            Push-to-talk hotkey
+            <small>Works from any app, even with ULTRON minimised. Empty = off.</small>
+          </span>
+          <input value={hotkey} placeholder="Ctrl+Shift+Space" onChange={(e) => setHotkey(e.target.value)} onBlur={() => update({ hotkey })} />
+        </label>
+        <Toggle
+          label="Only obey my voice"
+          hint={data.voiceId.whisperInstalled ? "Ignores other people, the TV and videos. Needs your voice recorded below." : "Needs local Whisper (scripts\\install-whisper.ps1)."}
+          checked={s.voiceLock}
+          onChange={(v) => update({ voiceLock: v })}
+        />
+        <div className="set-row">
+          <span>
+            Your voice: {data.voiceId.enrolled ? `learned (${data.voiceId.clips} recordings)` : `${data.voiceId.clips} of 3 recordings`}
+            <small>{recording ? `Recording — read aloud: "${recording}"` : "Each recording is 5 seconds; read the sentence shown."}</small>
+          </span>
+          <span>
+            <button className="hud-btn" disabled={Boolean(recording)} onClick={() => void enroll()}>
+              {recording ? "LISTENING…" : "RECORD"}
+            </button>{" "}
+            {data.voiceId.clips > 0 && (
+              <button className="hud-btn" onClick={() => void enroll(true)}>
+                RESET
+              </button>
+            )}
+          </span>
+        </div>
+        <label className="set-row">
+          <span>
+            Voice lock strictness <small>{s.voiceLockThreshold.toFixed(2)} — raise it if others get through, lower it if you&apos;re ignored.</small>
+          </span>
+          <input type="range" min={0.3} max={0.8} step={0.05} defaultValue={s.voiceLockThreshold} onMouseUp={(e) => update({ voiceLockThreshold: Number((e.target as HTMLInputElement).value) })} onKeyUp={(e) => update({ voiceLockThreshold: Number((e.target as HTMLInputElement).value) })} />
+        </label>
+      </section>
+
+      <section>
+        <h2>Webcam presence</h2>
+        <Toggle label="Notice when I sit down and leave" hint="Face detection in the browser — video never leaves this PC. Works in the ULTRON tab on this PC." checked={s.webcamPresence} onChange={(v) => update({ webcamPresence: v })} />
+        <label className="set-row">
+          <span>
+            Lock the PC when I&apos;m away for
+            <small>Minutes; 0 = never.</small>
+          </span>
+          <input type="number" min={0} max={120} defaultValue={s.presenceLockMinutes} onBlur={(e) => update({ presenceLockMinutes: Number(e.target.value) })} />
+        </label>
+      </section>
+
+      <section>
+        <h2>Everyday help</h2>
+        <Toggle label="Record screen time" hint="Which apps you use, kept on this PC (app names only)." checked={s.screenTime} onChange={(v) => update({ screenTime: v })} />
+        <Toggle label="Remind me about bills" hint="Checks Gmail once a day and reminds you 2 days before each due date." checked={s.billReminders} onChange={(v) => update({ billReminders: v })} />
+        <Toggle label="Headlines in the morning briefing" checked={s.newsInBriefing} onChange={(v) => update({ newsInBriefing: v })} />
+        <label className="set-row">
+          <span>
+            Stocks in the morning briefing
+            <small>Tickers, comma-separated — e.g. RELIANCE.NS, TCS.NS, ^NSEI</small>
+          </span>
+          <input
+            value={stocks}
+            onChange={(e) => setStocks(e.target.value)}
+            onBlur={() => update({ stockWatchlist: stocks.split(",").map((x) => x.trim()).filter(Boolean) })}
+          />
+        </label>
+      </section>
+
+      <section>
+        <h2>Routines ({data.routines.length})</h2>
+        {data.routines.length === 0 && <p className="set-empty">None yet — say &quot;when I say good night, turn off the lights and the TV&quot;.</p>}
+        {data.routines.map((r) => (
+          <div key={r.id} className="set-item">
+            <span>
+              <b>{r.name}</b> {r.steps.join(" → ")} {r.schedule && <small>runs {r.schedule}</small>}
+            </span>
+            <button className="hud-btn" onClick={() => act({ action: "delete_routine", id: r.id })}>
+              DELETE
+            </button>
+          </div>
+        ))}
       </section>
 
       <section>

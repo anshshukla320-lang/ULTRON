@@ -6,6 +6,7 @@ import { stripSpeechMarkup } from "@/lib/speechSegments";
 import { SentenceChunker } from "@/lib/sentenceChunker";
 import { SpeechPlayer } from "@/lib/speechPlayer";
 import { WhisperRecognizer } from "@/lib/whisperRecognizer";
+import { PresenceWatcher } from "@/lib/presenceWatcher";
 import { detectWake, isRepeatOf, isStopCommand, leadingWakeCommand, looksLikeEcho, stripLeadingWake } from "@/lib/voiceCommands";
 
 type AgentStatus = "wake" | "listening" | "thinking" | "speaking" | "confirm" | "unsupported";
@@ -90,6 +91,28 @@ async function* readEvents(res: Response): AsyncGenerator<AgentEvent> {
   if (buffer.trim()) yield JSON.parse(buffer) as AgentEvent;
 }
 
+/** A short two-note "I'm listening" sound. */
+function playChime(): void {
+  try {
+    const ctx = new AudioContext();
+    [880, 1320].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.09;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.13);
+    });
+    setTimeout(() => void ctx.close(), 500);
+  } catch {
+    // no audio — the status change still shows it
+  }
+}
+
 export default function VoiceAgent() {
   const [status, setStatus] = useState<AgentStatus>("wake");
   const [muted, setMuted] = useState(false);
@@ -97,7 +120,13 @@ export default function VoiceAgent() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   // Which speech recognizer to use (Settings > Hearing); null until loaded.
-  const [stt, setStt] = useState<{ engine: "browser" | "whisper"; language: "en" | "hi" | "auto"; whisperInstalled?: boolean } | null>(null);
+  const [stt, setStt] = useState<{
+    engine: "browser" | "whisper";
+    language: "en" | "hi" | "auto";
+    whisperInstalled?: boolean;
+    voiceLock?: boolean;
+    presence?: { enabled: boolean; lockMinutes: number };
+  } | null>(null);
 
   useEffect(() => {
     fetch("/api/stt")
@@ -137,6 +166,16 @@ export default function VoiceAgent() {
   const transcriptRef = useRef<Anthropic.MessageParam[]>([]);
 
   const player = () => (playerRef.current ??= new SpeechPlayer());
+
+  // Speaking speed from Settings, for the browser's fallback voice.
+  useEffect(() => {
+    fetch("/api/tts")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { speed?: number } | null) => {
+        if (d?.speed) player().rate = d.speed;
+      })
+      .catch(() => {});
+  }, []);
 
   const setStatusNow = useCallback((s: AgentStatus) => {
     statusRef.current = s;
@@ -350,6 +389,57 @@ export default function VoiceAgent() {
       });
   }, [handleUtterance, pushLog, clearFollowUpTimer, setStatusNow, armFollowUpWindow]);
 
+  /** Push-to-talk: stop whatever ULTRON is doing and listen for a command
+   *  right away, no wake word needed. */
+  const listenNow = useCallback(() => {
+    if (statusRef.current === "confirm" || statusRef.current === "unsupported") return;
+    interrupt();
+    playChime();
+    armFollowUpWindow();
+  }, [interrupt, armFollowUpWindow]);
+
+  // The global hotkey (and anything else the server wants the page to do).
+  useEffect(() => {
+    const events = new EventSource("/api/events");
+    events.addEventListener("listen", () => listenNow());
+    return () => events.close();
+  }, [listenNow]);
+
+  // Opened by the hotkey when no page was open: listen once the mic is up.
+  useEffect(() => {
+    if (!stt || !new URLSearchParams(window.location.search).has("listen")) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    const t = setTimeout(listenNow, 800);
+    return () => clearTimeout(t);
+  }, [stt, listenNow]);
+
+  // Webcam presence (Settings): greet the user when they come back, and
+  // lock the PC when they've been away long enough. Only on the PC itself —
+  // a phone watching its owner leave must not lock the computer.
+  useEffect(() => {
+    if (!stt?.presence?.enabled || !["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) return;
+    const lockMinutes = stt.presence.lockMinutes;
+    const watcher = new PresenceWatcher({
+      onArrive: (awayMs) => {
+        const hour = new Date().getHours();
+        const greeting = awayMs > 4 * 60 * 60_000 ? (hour < 12 ? "Good morning, sir." : hour < 17 ? "Good afternoon, sir." : "Good evening, sir.") : "Welcome back, sir.";
+        reminderQueueRef.current.unshift({ id: `presence-${Date.now()}`, kind: "notice", text: greeting });
+        announceReminders();
+      },
+      onAway: (awayMs) => {
+        if (lockMinutes > 0 && awayMs >= lockMinutes * 60_000) {
+          void fetch("/api/presence", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ event: "away", awayMinutes: Math.floor(awayMs / 60_000) }),
+          }).catch(() => {});
+        }
+      },
+    });
+    watcher.start().catch((err) => pushLog("error", `Webcam presence couldn't start: ${err instanceof Error ? err.message : String(err)}`));
+    return () => watcher.stop();
+  }, [stt, announceReminders, pushLog]);
+
   useEffect(() => {
     let stopped = false;
     const poll = async () => {
@@ -385,6 +475,18 @@ export default function VoiceAgent() {
       return;
     }
     const recognition = new Ctor();
+    if (stt.engine === "whisper") {
+      const wr = recognition as unknown as WhisperRecognizer;
+      // While waiting for "Hey ULTRON" the server checks with a small fast
+      // model first — the offline wake word.
+      wr.getMode = () => (wakeModeRef.current && statusRef.current === "wake" ? "wake" : "command");
+      let lastRejectLog = 0;
+      wr.onrejected = () => {
+        if (Date.now() - lastRejectLog < 60_000) return;
+        lastRejectLog = Date.now();
+        pushLog("action", "Ignored a voice that isn't yours (voice lock).");
+      };
+    }
     recognition.continuous = true;
     recognition.interimResults = true;
     // Chrome needs a locale; Whisper takes the language from Settings itself.
@@ -626,6 +728,16 @@ export default function VoiceAgent() {
                 </pre>
               )}
               {typeof t.input.task === "string" && <div className="confirm-detail">{t.input.task}</div>}
+              {typeof t.input.name === "string" && Array.isArray(t.input.confirmed_steps) && (
+                <div className="confirm-detail">
+                  &quot;{t.input.name}&quot; will:
+                  {(t.input.confirmed_steps as { tool: string; input: Record<string, unknown> }[]).map((s, i) => (
+                    <div key={i}>
+                      {i + 1}. {s.tool.replace(/_/g, " ")} {JSON.stringify(s.input)}
+                    </div>
+                  ))}
+                </div>
+              )}
               {typeof t.input.message === "string" && (
                 <div className="confirm-detail">
                   To: {String(t.input.to ?? "")}

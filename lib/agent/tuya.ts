@@ -166,7 +166,7 @@ async function accessToken(): Promise<string> {
   return token.value;
 }
 
-async function api<T>(method: string, path: string, query?: Record<string, string>, body?: unknown): Promise<T> {
+export async function tuyaApi<T>(method: string, path: string, query?: Record<string, string>, body?: unknown): Promise<T> {
   let r = await rawRequest<T>(method, path, query, body, await accessToken());
   if (!r.success && r.code === 1010) {
     token = null; // expired early — get a new one and retry once
@@ -184,7 +184,7 @@ export async function tuyaDevices(fresh = false): Promise<TuyaDevice[]> {
   let lastRowKey = "";
   for (let page = 0; page < 20; page++) {
     const query: Record<string, string> = { size: "100", ...(lastRowKey ? { last_row_key: lastRowKey } : {}) };
-    const r = await api<{ devices: TuyaDevice[]; has_more: boolean; last_row_key?: string }>("GET", "/v1.0/iot-01/associated-users/devices", query);
+    const r = await tuyaApi<{ devices: TuyaDevice[]; has_more: boolean; last_row_key?: string }>("GET", "/v1.0/iot-01/associated-users/devices", query);
     devices.push(...(r.devices ?? []));
     if (!r.has_more || !r.last_row_key) break;
     lastRowKey = r.last_row_key;
@@ -197,7 +197,7 @@ const specCache = new Map<string, TuyaFunction[]>();
 async function functionsOf(id: string): Promise<TuyaFunction[]> {
   const cached = specCache.get(id);
   if (cached) return cached;
-  const r = await api<{ functions?: TuyaFunction[] }>("GET", `/v1.0/iot-03/devices/${encodeURIComponent(id)}/specification`);
+  const r = await tuyaApi<{ functions?: TuyaFunction[] }>("GET", `/v1.0/iot-03/devices/${encodeURIComponent(id)}/specification`);
   const fns = r.functions ?? [];
   specCache.set(id, fns);
   return fns;
@@ -396,7 +396,7 @@ export function buildTuyaCommands(d: TuyaDevice, fns: TuyaFunction[], c: TuyaCon
 
 async function send(d: TuyaDevice, commands: TuyaStatus[]): Promise<string> {
   if (!d.online) throw new Error(`${d.name} is offline — check that it's powered and on Wi-Fi.`);
-  await api("POST", `/v1.0/iot-03/devices/${encodeURIComponent(d.id)}/commands`, undefined, { commands });
+  await tuyaApi("POST", `/v1.0/iot-03/devices/${encodeURIComponent(d.id)}/commands`, undefined, { commands });
   deviceCache = null;
   // Reflect the change locally rather than re-reading straight away — the
   // cloud can take a moment to report the device's new state.

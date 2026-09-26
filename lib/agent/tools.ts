@@ -28,6 +28,15 @@ import { searchDocuments, readDocument } from "./documents";
 import { sendWhatsApp } from "./whatsapp";
 import { listSmartHome, controlSmartHome, controlSmartHomeSecurity } from "./smartHome";
 import { controlTv } from "./androidTv";
+import { irControl } from "./tuyaIr";
+import { saveRoutine, runRoutine, runRoutineSteps, listRoutines, deleteRoutine, findRoutine, routineNeedsConfirmation, type RoutineStep, type ToolPolicy } from "./routines";
+import { startFocus, stopFocus, focusStatus } from "./focus";
+import { screenTimeReport } from "./screenTime";
+import { getNews, getStockPrices, getCricketScores } from "./liveInfo";
+import { checkBills } from "./bills";
+import { readClipboard, writeClipboard } from "./clipboard";
+import { listEnglishVoices } from "./piperTts";
+import { updateSettings } from "./settings";
 import { operateComputer } from "./computerUse";
 import { getSettings } from "./settings";
 import { getWeather } from "./weather";
@@ -113,6 +122,22 @@ export type ToolName =
   | "smart_home_control"
   | "smart_home_security"
   | "tv_control"
+  | "ir_remote"
+  | "save_routine"
+  | "run_routine"
+  | "list_routines"
+  | "delete_routine"
+  | "start_focus"
+  | "stop_focus"
+  | "focus_status"
+  | "screen_time_report"
+  | "get_news"
+  | "get_stock_price"
+  | "cricket_scores"
+  | "check_bills"
+  | "read_clipboard"
+  | "write_clipboard"
+  | "set_voice"
   | "operate_computer";
 
 /** Tools in here run immediately. Anything not listed requires the user to
@@ -186,6 +211,22 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "smart_home_devices",
   "smart_home_control",
   "tv_control",
+  "ir_remote",
+  "save_routine",
+  "run_routine", // unless a step needs confirming — see needsConfirmation()
+  "list_routines",
+  "delete_routine",
+  "start_focus",
+  "stop_focus",
+  "focus_status",
+  "screen_time_report",
+  "get_news",
+  "get_stock_price",
+  "cricket_scores",
+  "check_bills",
+  "read_clipboard",
+  "write_clipboard",
+  "set_voice",
   // send_whatsapp and smart_home_security need confirmation too.
   // power_action and clean_disk_junk deliberately need confirmation.
 ]);
@@ -972,6 +1013,120 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "ir_remote",
+    description:
+      "Press a button on a remote the user added to their Smart Life IR blaster (fan, TV, set-top box, speaker…), or set an IR air conditioner. For AC: temperature (16-30), mode (cool/heat/auto/fan/dry), fan_speed (auto/low/medium/high), or key 'off'. For other remotes: key like on, off, power, speed up, speed down, swing, timer, volume up, mute. IR can't read a device's state — power usually toggles.",
+    input_schema: {
+      type: "object",
+      properties: {
+        remote: { type: "string", description: "Remote name or ir:<id> from smart_home_devices, e.g. 'Bedroom AC'" },
+        key: { type: "string" },
+        temperature: { type: "number" },
+        mode: { type: "string" },
+        fan_speed: { type: "string" },
+      },
+      required: ["remote"],
+    },
+  },
+  {
+    name: "save_routine",
+    description:
+      "Create or replace a routine: a named list of tool calls that run together when the user says its name (e.g. 'good night': lights off, TV off, PC to sleep; 'movie mode': dim lights, TV on, open Netflix). Optionally on a schedule (then every step must be one that runs without confirmation). Use the real device names/ids from smart_home_devices. Read the steps back to the user in a sentence.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "What the user will say, e.g. 'good night'" },
+        steps: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { tool: { type: "string" }, input: { type: "object" } },
+            required: ["tool", "input"],
+          },
+        },
+        schedule: {
+          type: "object",
+          description: "Optional. at: '23:30', '7:15 am', 'sunset', 'sunrise', or 'sunset-30'; days: ['mon','tue',…] or ['weekdays'] / ['weekends'] (omit for every day).",
+          properties: { at: { type: "string" }, days: { type: "array", items: { type: "string" } } },
+          required: ["at"],
+        },
+        announce: { type: "boolean", description: "Scheduled runs: say/notify when it runs (default false — quiet)." },
+      },
+      required: ["name", "steps"],
+    },
+  },
+  {
+    name: "run_routine",
+    description: "Run a saved routine by name. Asks the user first only if one of its steps needs confirmation.",
+    input_schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+  },
+  {
+    name: "list_routines",
+    description: "List the saved routines, their steps and schedules.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "delete_routine",
+    description: "Delete a saved routine.",
+    input_schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+  },
+  {
+    name: "start_focus",
+    description: "Start focus mode (Pomodoro): focus rounds with breaks, announced at each switch, and a nudge when YouTube / social media / games come to the front during a round.",
+    input_schema: {
+      type: "object",
+      properties: {
+        minutes: { type: "number", description: "Focus round length, default 25" },
+        break_minutes: { type: "number", description: "Break length, default 5" },
+        rounds: { type: "number", description: "How many rounds, default 1" },
+        task: { type: "string", description: "What they're working on, if they said" },
+      },
+      required: [],
+    },
+  },
+  { name: "stop_focus", description: "End focus mode early.", input_schema: { type: "object", properties: {}, required: [] } },
+  { name: "focus_status", description: "How much of the current focus round or break is left.", input_schema: { type: "object", properties: {}, required: [] } },
+  {
+    name: "screen_time_report",
+    description: "How long the user spent in each app/site on the PC.",
+    input_schema: { type: "object", properties: { period: { type: "string", enum: ["today", "yesterday", "week"] } }, required: [] },
+  },
+  {
+    name: "get_news",
+    description: "Latest news headlines (India by default), optionally about a topic.",
+    input_schema: { type: "object", properties: { topic: { type: "string" } }, required: [] },
+  },
+  {
+    name: "get_stock_price",
+    description: "Live stock / index prices. Accepts company names or tickers, comma-separated (e.g. 'Reliance, TCS', 'Nifty', 'AAPL').",
+    input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+  },
+  {
+    name: "cricket_scores",
+    description: "Live and recent cricket match scores, optionally for one team.",
+    input_schema: { type: "object", properties: { team: { type: "string" } }, required: [] },
+  },
+  {
+    name: "check_bills",
+    description: "Scan Gmail for bills (electricity, phone, broadband, credit card…), set reminders two days before each is due, and list upcoming bills.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "read_clipboard",
+    description: "Read what the user copied (text, an image, or copied files). Use when they say 'this', 'what I copied', 'summarise this', 'translate this', 'reply to this'.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "write_clipboard",
+    description: "Put text on the clipboard so the user can paste it (a drafted reply, a translation, a summary).",
+    input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+  },
+  {
+    name: "set_voice",
+    description: "Change how ULTRON sounds: which installed voice (from the list this returns on error or with no arguments) and/or speaking speed (0.7 slow – 1.5 fast; 1 normal).",
+    input_schema: { type: "object", properties: { voice: { type: "string" }, speed: { type: "number" } }, required: [] },
+  },
+  {
     name: "operate_computer",
     description:
       "Carry out a multi-step task on the user's PC by looking at the screen and using the mouse and keyboard — e.g. filling in a form, renaming files in Explorer, changing a setting in an app, finding something on a website. Needs the user's confirmation. Describe the task completely and concretely (which app/site, what to do, when to stop). It will not enter passwords or payment details, buy things, send messages, or delete files. Prefer a dedicated tool when one exists — this is slower.",
@@ -1003,10 +1158,54 @@ export type ToolOutput =
   | { text: string; image: { mediaType: "image/png" | "image/jpeg"; data: string } }
   | { text: string; document: { mediaType: "application/pdf"; data: string } };
 
+const KNOWN_TOOL_NAMES = new Set<string>(TOOLS.map((t) => t.name));
+
+/** What routines may contain and which of their steps run without asking. */
+export const TOOL_POLICY: ToolPolicy = {
+  known: (name) => KNOWN_TOOL_NAMES.has(name),
+  auto: (name) => AUTO_EXECUTE.has(name as ToolName),
+};
+
+/** Whether this call must wait for the user's OK. Mostly fixed per tool; a
+ *  routine asks only when one of its steps would. */
+/** What the confirm box shows and, once approved, what runs. For a routine
+ *  that's its current steps, so the user approves what will really happen. */
+export function confirmationInput(name: string, input: Record<string, unknown>): Record<string, unknown> {
+  if (name !== "run_routine") return input;
+  const r = findRoutine(String(input.name ?? ""));
+  return { name: r?.name ?? String(input.name ?? ""), confirmed_steps: r?.steps ?? [] };
+}
+
+export function needsConfirmation(name: string, input: Record<string, unknown>): boolean {
+  if (name === "run_routine") return routineNeedsConfirmation(String(input.name ?? ""), TOOL_POLICY);
+  return !AUTO_EXECUTE.has(name as ToolName);
+}
+
+async function setVoice(voice?: string, speed?: number): Promise<string> {
+  const installed = await listEnglishVoices();
+  const patch: { voice?: string; voiceSpeed?: number } = {};
+  if (voice !== undefined) {
+    const v = voice.trim().toLowerCase();
+    const pick = ["default", "normal", "original"].includes(v) ? "" : installed.find((x) => x.toLowerCase() === v) ?? installed.find((x) => x.toLowerCase().includes(v));
+    if (pick === undefined) {
+      throw new Error(`No installed voice matches "${voice}". Installed: ${installed.join(", ") || "none"}. More can be added with scripts\\install-piper-voice.ps1 (jarvis, butler, us-male, us-female, uk-female, narrator).`);
+    }
+    patch.voice = pick;
+  }
+  if (speed !== undefined) patch.voiceSpeed = speed;
+  if (voice === undefined && speed === undefined) {
+    const s = await getSettings();
+    return `Voice: ${s.voice || "default"}, speed ${s.voiceSpeed}. Installed voices: ${installed.join(", ") || "none (browser voice)"}.`;
+  }
+  const s = await updateSettings(patch);
+  return `Voice set to ${s.voice || "the default"} at speed ${s.voiceSpeed}.`;
+}
+
 export async function executeTool(
   name: ToolName,
   input: Record<string, unknown>,
-  ctx: { signal?: AbortSignal } = {},
+  /** confirmed: the user approved exactly this call in the confirm box. */
+  ctx: { signal?: AbortSignal; confirmed?: boolean } = {},
 ): Promise<ToolOutput> {
   switch (name) {
     case "open_app":
@@ -1201,6 +1400,59 @@ export async function executeTool(
         query: input.query ? String(input.query) : undefined,
         text: input.text ? String(input.text) : undefined,
       });
+    case "ir_remote":
+      return irControl({
+        remote: String(input.remote ?? ""),
+        key: input.key ? String(input.key) : undefined,
+        temperature: input.temperature !== undefined ? Number(input.temperature) : undefined,
+        mode: input.mode ? String(input.mode) : undefined,
+        fan_speed: input.fan_speed ? String(input.fan_speed) : undefined,
+      });
+    case "save_routine":
+      return saveRoutine(input as never, TOOL_POLICY);
+    case "run_routine": {
+      // Steps run as if the user had asked for each one directly: they
+      // approved the routine as a whole when any step needed approval — and
+      // then exactly the steps they were shown (snapshotted server-side), so
+      // an edit in between can't sneak something in.
+      const runStep = (tool: string, stepInput: Record<string, unknown>) => executeTool(tool as ToolName, stepInput, { signal: ctx.signal });
+      if (ctx.confirmed && Array.isArray(input.confirmed_steps)) {
+        return runRoutineSteps({ id: "", name: String(input.name ?? "routine"), steps: input.confirmed_steps as RoutineStep[], createdAt: "" }, runStep);
+      }
+      if (routineNeedsConfirmation(String(input.name ?? ""), TOOL_POLICY)) throw new Error("That routine needs the user's confirmation.");
+      return runRoutine(String(input.name ?? ""), runStep);
+    }
+    case "list_routines":
+      return listRoutines();
+    case "delete_routine":
+      return deleteRoutine(String(input.name ?? ""));
+    case "start_focus":
+      return startFocus({
+        minutes: input.minutes !== undefined ? Number(input.minutes) : undefined,
+        breakMinutes: input.break_minutes !== undefined ? Number(input.break_minutes) : undefined,
+        rounds: input.rounds !== undefined ? Number(input.rounds) : undefined,
+        task: input.task ? String(input.task) : undefined,
+      });
+    case "stop_focus":
+      return stopFocus();
+    case "focus_status":
+      return focusStatus();
+    case "screen_time_report":
+      return screenTimeReport(input.period ? String(input.period) : "today");
+    case "get_news":
+      return getNews(input.topic ? String(input.topic) : "");
+    case "get_stock_price":
+      return getStockPrices(String(input.query ?? ""));
+    case "cricket_scores":
+      return getCricketScores(input.team ? String(input.team) : "");
+    case "check_bills":
+      return checkBills();
+    case "read_clipboard":
+      return readClipboard();
+    case "write_clipboard":
+      return writeClipboard(String(input.text ?? ""));
+    case "set_voice":
+      return setVoice(input.voice ? String(input.voice) : undefined, input.speed !== undefined ? Number(input.speed) : undefined);
     case "operate_computer": {
       if (!(await getSettings()).computerUse) throw new Error("Operating the computer is switched off in Settings.");
       return operateComputer(String(input.task ?? ""), {
