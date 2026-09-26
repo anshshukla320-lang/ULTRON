@@ -69,6 +69,11 @@ export type AgentEvent =
       messages: Anthropic.MessageParam[];
       reply: string;
       pending: { token: string; toolUse: PendingToolUse[] } | null;
+      /** Tools the client (the phone app) must run itself. The client sends
+       *  the conversation back with one user message holding `serverResults`
+       *  followed by its own tool_result blocks for these calls. */
+      clientCalls?: PendingToolUse[];
+      serverResults?: Anthropic.ToolResultBlockParam[];
     }
   | { type: "error"; error: string };
 
@@ -86,6 +91,9 @@ export interface AgentDeps {
   advisor?: boolean;
   /** Which usage bucket this conversation's cost is counted under. */
   feature?: Feature;
+  /** Tools that run on the client (the phone app: calls, SMS, alarms…).
+   *  Claude can call them; the turn then pauses and hands them back. */
+  clientTools?: Anthropic.Tool[];
 }
 
 interface ReadyResult {
@@ -174,6 +182,8 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
     reply: spoken.trim(),
     pending,
   });
+  const clientTools = deps.clientTools ?? [];
+  const clientToolNames = new Set(clientTools.map((t) => t.name));
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     let response: Anthropic.Beta.Messages.BetaMessage;
@@ -184,7 +194,9 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
           model: MODEL,
           max_tokens: MAX_TOKENS,
           system: deps.system,
-          tools: useAdvisor ? [...CACHED_TOOLS, ADVISOR_TOOL] : CACHED_TOOLS,
+          // Client tools go after the cached server tools, so the phone's
+          // list doesn't disturb the cached prefix.
+          tools: [...CACHED_TOOLS, ...clientTools, ...(useAdvisor ? [ADVISOR_TOOL] : [])],
           // Caches the conversation so far, so each step of a multi-tool
           // turn only pays full price for what's new.
           cache_control: { type: "ephemeral" },
@@ -251,13 +263,21 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
     // the user would be asked to approve something that can't run.
     const readyResults: ReadyResult[] = [];
     const confirmBlocks: Anthropic.Beta.Messages.BetaToolUseBlock[] = [];
+    const clientBlocks = toolUseBlocks.filter((b) => clientToolNames.has(b.name));
     for (const b of toolUseBlocks) {
       const input = b.input as Record<string, unknown>;
+      if (clientToolNames.has(b.name)) continue; // the phone runs these
       if (!KNOWN_TOOLS.has(b.name)) {
         const msg = `There is no tool named "${b.name}".`;
         readyResults.push({ id: b.id, output: msg, isError: true });
         yield { type: "action", action: { name: b.name, input, output: msg, status: "error" } };
       } else if (needsConfirmation(b.name, input)) {
+        if (clientBlocks.length) {
+          // A confirm box and a hand-off to the phone can't share one turn.
+          const msg = "Not run: this needs the user's confirmation — ask for it on its own, after the phone actions.";
+          readyResults.push({ id: b.id, output: msg, isError: true });
+          continue;
+        }
         confirmBlocks.push(b);
       } else {
         try {
@@ -271,6 +291,16 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
         }
       }
       if (deps.signal?.aborted) return;
+    }
+
+    if (clientBlocks.length > 0) {
+      const done = finish(null) as Extract<AgentEvent, { type: "done" }>;
+      yield {
+        ...done,
+        clientCalls: clientBlocks.map((b) => ({ id: b.id, name: b.name, input: b.input as Record<string, unknown> })),
+        serverResults: readyResults.map(toolResultBlock),
+      };
+      return;
     }
 
     if (confirmBlocks.length > 0) {

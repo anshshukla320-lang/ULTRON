@@ -7,6 +7,7 @@ import { recentEpisodesForPrompt } from "@/lib/agent/episodes";
 import { describeSignals, parseSignals } from "@/lib/agent/signals";
 import { getSettings } from "@/lib/agent/settings";
 import { spentToday } from "@/lib/agent/usage";
+import { parseClientTools, PHONE_CHANNEL_NOTE } from "@/lib/agent/clientTools";
 
 export const runtime = "nodejs";
 
@@ -40,12 +41,15 @@ export async function POST(req: Request) {
     ? { resolution: { token: String(body.resolution.token), approved: body.resolution.approved === true } }
     : { messages: Array.isArray(body.messages) ? body.messages : [] };
 
+  const clientTools = parseClientTools(body.clientTools);
   const events = runAgent(start, {
     client: new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }),
     system: buildSystemBlocks(await recallMemoryForPrompt(), new Date(), {
       recentConversations: await recentEpisodesForPrompt(),
       speaking: describeSignals(parseSignals(body.signals)),
+      ...(body.client === "android" ? { channel: PHONE_CHANNEL_NOTE } : {}),
     }),
+    clientTools,
     // Fires when the browser aborts the fetch (the user said "stop"), so we
     // stop paying for tokens nobody will hear.
     signal: req.signal,
