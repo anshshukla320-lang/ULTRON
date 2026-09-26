@@ -17,7 +17,8 @@ dependencies {
     // Claude's official SDK — the phone's own brain when the PC is away.
     implementation("com.anthropic:anthropic-java:2.65.0")
     // Talking to ULTRON on the PC.
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Part of PcBrain's constructor, so the app sees it too.
+    api("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
 
     testImplementation(kotlin("test-junit"))
