@@ -17,7 +17,8 @@ import { showNotification, speakOnPc } from "../lib/agent/nativeOutput";
 import { windowsExecutor, comboToVks, keyToVk } from "../lib/agent/computerUse";
 import { findWhisper, transcribeWav } from "../lib/agent/whisperStt";
 import { runPowerShell } from "../lib/agent/powershell";
-import { readFileSync } from "node:fs";
+import { adbPath, controlTv } from "../lib/agent/androidTv";
+import { existsSync, readFileSync } from "node:fs";
 
 const results: { name: string; ok: boolean; detail: string }[] = [];
 // A check can report SKIP when the CI machine lacks the hardware (e.g. no
@@ -164,6 +165,21 @@ await check("computer use: real mouse, keyboard and screenshots", async () => {
   if (!blocked.failsafe) throw new Error("mouse in the corner didn't trigger the emergency stop");
   void corner;
   return `screen ${g.width}x${g.height} (scale ${g.scale.toFixed(2)}); typed Unicode text round-tripped; screenshot ${Math.round(jpeg.length / 1024)} KB; failsafe works`;
+});
+
+await check("TV control: ADB installed, unreachable TV gives a clear answer", async () => {
+  if (!existsSync(adbPath())) return `${SKIP}ADB not installed`;
+  process.env.ANDROID_TV_HOST = "192.0.2.10"; // reserved test address — nothing answers
+  try {
+    await controlTv({ action: "mute" });
+    throw new Error("expected an error");
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (!/Can't reach the TV/.test(msg)) throw err;
+    return `${adbPath()} works; ${msg.split(" — ")[0]}`;
+  } finally {
+    delete process.env.ANDROID_TV_HOST;
+  }
 });
 
 await check("Whisper transcribes Windows' own voice", async () => {

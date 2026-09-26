@@ -28,6 +28,8 @@ async function snapshot() {
     integrations: {
       google: Boolean(process.env.GOOGLE_CLIENT_ID),
       homeAssistant: Boolean(process.env.HOME_ASSISTANT_URL && process.env.HOME_ASSISTANT_TOKEN),
+      smartLife: Boolean(process.env.TUYA_ACCESS_ID && process.env.TUYA_ACCESS_SECRET),
+      tv: process.env.ANDROID_TV_HOST?.trim() || null,
       telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN),
       homeLocation: process.env.ULTRON_HOME_LOCATION ?? null,
     },

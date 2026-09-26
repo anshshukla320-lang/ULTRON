@@ -39,6 +39,10 @@ function describe(s: HaState): string {
 }
 
 /** smart_home_devices tool. */
+export function haConfigured(): boolean {
+  return Boolean(process.env.HOME_ASSISTANT_URL && process.env.HOME_ASSISTANT_TOKEN);
+}
+
 export async function listDevices(query = ""): Promise<string> {
   const q = query.trim().toLowerCase();
   const interesting = /^(light|switch|fan|climate|cover|lock|media_player|scene|script|vacuum|alarm_control_panel|input_boolean)\./;
@@ -71,10 +75,27 @@ export function serviceFor(entityId: string, action: string): { domain: string; 
   return { domain, service };
 }
 
-async function call(entityId: string, action: string, opts: { brightness?: number; temperature?: number }): Promise<string> {
-  const { domain, service } = serviceFor(entityId, action);
+export interface HaExtras {
+  brightness?: number;
+  temperature?: number;
+  color?: string;
+  warmth?: number; // 0 = warmest, 100 = coolest white
+}
+
+async function call(entityId: string, action: string, opts: HaExtras): Promise<string> {
+  const lightTweak = entityId.startsWith("light.") && (opts.brightness !== undefined || opts.color !== undefined || opts.warmth !== undefined);
+  const { domain, service } = serviceFor(entityId, lightTweak && ["set", "adjust"].includes(action.trim().toLowerCase()) ? "on" : action);
   const data: Record<string, unknown> = { entity_id: entityId };
-  if (opts.brightness !== undefined && domain === "light") data.brightness_pct = Math.min(100, Math.max(0, Math.round(opts.brightness)));
+  if (domain === "light" && service === "turn_on") {
+    if (opts.brightness !== undefined) data.brightness_pct = Math.min(100, Math.max(0, Math.round(opts.brightness)));
+    if (opts.color) {
+      const hex = opts.color.trim().match(/^#?([0-9a-f]{6})$/i)?.[1];
+      if (hex) data.rgb_color = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+      else data.color_name = opts.color.trim().toLowerCase().replace(/\s+/g, "");
+    } else if (opts.warmth !== undefined) {
+      data.color_temp_kelvin = Math.round(2700 + (Math.min(100, Math.max(0, opts.warmth)) / 100) * (6500 - 2700));
+    }
+  }
   if (opts.temperature !== undefined && domain === "climate") data.temperature = opts.temperature;
   await ha(`/api/services/${domain}/${service}`, { method: "POST", body: JSON.stringify(data) });
   const after = await ha<HaState>(`/api/states/${entityId}`).catch(() => null);
@@ -82,12 +103,12 @@ async function call(entityId: string, action: string, opts: { brightness?: numbe
 }
 
 /** smart_home_control tool — everyday devices, runs immediately. */
-export async function controlDevice(entityId: string, action: string, brightness?: number, temperature?: number): Promise<string> {
+export async function controlDevice(entityId: string, action: string, brightness?: number, temperature?: number, more: Omit<HaExtras, "brightness" | "temperature"> = {}): Promise<string> {
   const state = await ha<HaState>(`/api/states/${entityId}`);
   if (isSecurityDevice(entityId, state.attributes.device_class)) {
     throw new Error(`${entityId} is a lock, alarm or door — use smart_home_security so the user confirms it first.`);
   }
-  return call(entityId, action, { brightness, temperature });
+  return call(entityId, action, { brightness, temperature, ...more });
 }
 
 /** smart_home_security tool — locks, alarms, garage/doors; needs confirmation. */

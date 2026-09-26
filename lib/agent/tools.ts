@@ -26,7 +26,8 @@ import { setProactive } from "./proactive";
 import { usageReport } from "./usage";
 import { searchDocuments, readDocument } from "./documents";
 import { sendWhatsApp } from "./whatsapp";
-import { listDevices, controlDevice, controlSecurityDevice } from "./homeAssistant";
+import { listSmartHome, controlSmartHome, controlSmartHomeSecurity } from "./smartHome";
+import { controlTv } from "./androidTv";
 import { operateComputer } from "./computerUse";
 import { getSettings } from "./settings";
 import { getWeather } from "./weather";
@@ -111,6 +112,7 @@ export type ToolName =
   | "smart_home_devices"
   | "smart_home_control"
   | "smart_home_security"
+  | "tv_control"
   | "operate_computer";
 
 /** Tools in here run immediately. Anything not listed requires the user to
@@ -183,6 +185,7 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "read_document",
   "smart_home_devices",
   "smart_home_control",
+  "tv_control",
   // send_whatsapp and smart_home_security need confirmation too.
   // power_action and clean_disk_junk deliberately need confirmation.
 ]);
@@ -915,7 +918,7 @@ export const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "smart_home_devices",
-    description: "List the user's smart-home devices from Home Assistant (lights, switches, fans, climate, covers, locks, media players, scenes) with their current state and entity ids.",
+    description: "List the user's smart-home devices — Smart Life / Tuya bulbs, plugs and switches, and Home Assistant entities — with their current state and ids. Call it before controlling a device whose id you don't know.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "Optional words to filter by, e.g. 'bedroom' or 'light'" } },
@@ -924,13 +927,17 @@ export const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "smart_home_control",
-    description: "Control an everyday smart-home device: on, off, toggle, brightness for lights, set_temperature for climate, open/close/stop for blinds, play/pause for media players, activate a scene. Not for locks, alarms or garage/doors (use smart_home_security).",
+    description: "Control an everyday smart-home device (light, plug, switch, fan, climate, blinds, scene): on, off, toggle, or set with brightness / color / warmth for lights, speed for fans, set_temperature for climate, open/close/stop for blinds. A plug with a fan or lamp on it is switched with on/off. Not for locks, alarms or garage/doors (use smart_home_security), nor the TV (use tv_control).",
     input_schema: {
       type: "object",
       properties: {
-        entity_id: { type: "string", description: "From smart_home_devices, e.g. light.bedroom" },
-        action: { type: "string", description: "on, off, toggle, open, close, stop, play, pause, set_temperature" },
-        brightness: { type: "number", description: "Lights only: 0-100" },
+        entity_id: { type: "string", description: "Device id from smart_home_devices (tuya:… or light.bedroom), or the device's name" },
+        action: { type: "string", description: "on, off, toggle, set, open, close, stop, play, pause, set_temperature" },
+        brightness: { type: "number", description: "Lights: 0-100" },
+        color: { type: "string", description: "Lights: a colour name (red, blue, purple…) or #rrggbb" },
+        warmth: { type: "number", description: "White lights: 0 = warm yellow, 100 = cool daylight" },
+        speed: { type: "number", description: "Fans: 0-100" },
+        channel: { type: "number", description: "Multi-switch boards: which switch (1, 2, 3…)" },
         temperature: { type: "number", description: "Climate only, with set_temperature" },
       },
       required: ["entity_id", "action"],
@@ -946,6 +953,22 @@ export const TOOLS: Anthropic.Tool[] = [
         action: { type: "string", description: "lock, unlock, arm, disarm, open, close" },
       },
       required: ["entity_id", "action"],
+    },
+  },
+  {
+    name: "tv_control",
+    description:
+      "Control the user's Android / Google TV over Wi-Fi: power_on, power_off, status, volume_up / volume_down (with steps), mute, play_pause, next, previous, home, back, up/down/left/right/ok (with steps), open_app (e.g. YouTube, Netflix, Prime Video, Hotstar), youtube_search (opens YouTube with a query), type_text (into a focused search box).",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: { type: "string" },
+        steps: { type: "number", description: "How many presses for volume or arrow keys" },
+        app: { type: "string", description: "For open_app" },
+        query: { type: "string", description: "For youtube_search" },
+        text: { type: "string", description: "For type_text" },
+      },
+      required: ["action"],
     },
   },
   {
@@ -1154,16 +1177,30 @@ export async function executeTool(
     case "send_whatsapp":
       return sendWhatsApp(String(input.to ?? ""), String(input.message ?? ""));
     case "smart_home_devices":
-      return listDevices(input.query ? String(input.query) : "");
-    case "smart_home_control":
-      return controlDevice(
-        String(input.entity_id ?? ""),
-        String(input.action ?? ""),
-        input.brightness !== undefined ? Number(input.brightness) : undefined,
-        input.temperature !== undefined ? Number(input.temperature) : undefined,
-      );
+      return listSmartHome(input.query ? String(input.query) : "");
+    case "smart_home_control": {
+      const num = (v: unknown) => (v === undefined || v === null || v === "" ? undefined : Number(v));
+      return controlSmartHome({
+        device: String(input.entity_id ?? input.device ?? ""),
+        action: String(input.action ?? ""),
+        brightness: num(input.brightness),
+        temperature: num(input.temperature),
+        color: input.color ? String(input.color) : undefined,
+        warmth: num(input.warmth),
+        speed: num(input.speed),
+        channel: num(input.channel),
+      });
+    }
     case "smart_home_security":
-      return controlSecurityDevice(String(input.entity_id ?? ""), String(input.action ?? ""));
+      return controlSmartHomeSecurity(String(input.entity_id ?? ""), String(input.action ?? ""));
+    case "tv_control":
+      return controlTv({
+        action: String(input.action ?? ""),
+        steps: input.steps !== undefined ? Number(input.steps) : undefined,
+        app: input.app ? String(input.app) : undefined,
+        query: input.query ? String(input.query) : undefined,
+        text: input.text ? String(input.text) : undefined,
+      });
     case "operate_computer": {
       if (!(await getSettings()).computerUse) throw new Error("Operating the computer is switched off in Settings.");
       return operateComputer(String(input.task ?? ""), {

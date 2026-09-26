@@ -28,7 +28,7 @@ interface Snapshot {
     byModel: Record<string, number>;
     cacheHitRate: number;
   };
-  integrations: { google: boolean; homeAssistant: boolean; telegram: boolean; homeLocation: string | null };
+  integrations: { google: boolean; homeAssistant: boolean; smartLife: boolean; tv: string | null; telegram: boolean; homeLocation: string | null };
 }
 
 const money = (n: number) => `$${n < 1 ? n.toFixed(3) : n.toFixed(2)}`;
@@ -249,6 +249,10 @@ export default function SettingsPage() {
         <p className="set-small">
           Google: {data.integrations.google ? "configured — connect at " : "not configured (.env.local)"}
           {data.integrations.google && <a href="/api/gmail/auth">/api/gmail/auth</a>}
+          <br />
+          Smart Life lights &amp; plugs: {data.integrations.smartLife ? "configured" : "not configured (TUYA_ACCESS_ID / TUYA_ACCESS_SECRET)"}
+          <br />
+          TV: {data.integrations.tv ? `configured (${data.integrations.tv})` : "not configured (ANDROID_TV_HOST)"}
           <br />
           Home Assistant: {data.integrations.homeAssistant ? "configured" : "not configured (HOME_ASSISTANT_URL / HOME_ASSISTANT_TOKEN)"}
           <br />

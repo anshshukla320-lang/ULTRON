@@ -100,14 +100,52 @@ A few things to try:
   `ULTRON_DOCUMENT_FOLDERS`.
 - **Messaging.** "Tell Priya I'm running late on WhatsApp" (WhatsApp desktop,
   confirmed first). Text ULTRON from your phone through a Telegram bot.
-- **Smart home** through Home Assistant — lights, fans, climate, scenes;
-  locks, alarms and garage doors need confirmation.
+- **Smart home.** "Turn off the bedroom light", "dim it to 30", "make it
+  blue", "switch the fan on", "turn on the TV and open YouTube", "TV volume
+  down". Smart Life / Tuya lights and plugs, Android / Google TVs, and Home
+  Assistant; locks, alarms and garage doors need confirmation. Setup below.
 - **Better hearing.** `scripts\install-whisper.ps1`, then Settings >
   Hearing > Whisper: local, offline, more accurate, understands Hindi.
 
 Anything risky (sending email, running code, installing apps, shutting
 down, deleting files) shows a confirm box first. Setup for keys and
 accounts is in `.env.example`.
+
+### Smart home setup
+
+**Smart Life lights and plugs** (Wipro, Syska, Halonix, Havells and other
+brands controlled from the Smart Life / Tuya app). About 10 minutes, once:
+
+1. Sign up at [iot.tuya.com](https://iot.tuya.com) (free).
+2. **Cloud > Development > Create Cloud Project.** Development method
+   *Smart Home*; data center *India* (the one your Smart Life account is in;
+   otherwise set `TUYA_REGION`, see `.env.example`). Keep the suggested API services
+   (IoT Core must be among them).
+3. Open the project, **Devices > Link App Account > Add App Account**, and scan
+   the QR code with the Smart Life app (Me > scan icon, top right). All your
+   app devices now appear in the project.
+4. From the project's **Overview**, copy the Access ID and Access Secret into
+   `.env.local` as `TUYA_ACCESS_ID` and `TUYA_ACCESS_SECRET`, then restart ULTRON.
+
+Tuya's free IoT Core plan has to be renewed every few months (free, one
+form on iot.tuya.com); ULTRON tells you when it has expired.
+
+A **fan without Wi-Fi** can be controlled by plugging it into a Wi-Fi smart
+plug that works with Smart Life. Name the plug "Fan" in the app.
+
+**Android / Google TV** (Sony, Mi, TCL, OnePlus, Hisense, Vu...):
+
+1. On the TV: **Settings > Device Preferences > About**, press *Build* 7 times
+   to unlock Developer options. Then **Developer options > USB debugging** on
+   (and *Network debugging* / *ADB over network* if your TV has it).
+2. Find the TV's IP address under **Settings > Network**. Reserving that
+   address in your router's DHCP settings keeps it from changing.
+3. On the PC: `powershell -ExecutionPolicy Bypass -File scripts\install-adb.ps1 -Tv <TV-IP>`,
+   then accept **Allow debugging?** on the TV (tick *Always allow*).
+4. Put `ANDROID_TV_HOST=<TV-IP>` in `.env.local` and restart ULTRON.
+
+To switch the TV on from standby, turn on *network standby* / *remote start*
+in the TV's settings if it has it.
 
 ### Tests
 
