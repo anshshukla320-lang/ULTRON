@@ -11,7 +11,8 @@ import os from "node:os";
 import path from "node:path";
 import { scanDiskJunk, cleanDiskJunk } from "../lib/agent/diskCleanup";
 import { runCode } from "../lib/agent/codeRunner";
-import { getWeather } from "../lib/agent/weather";
+import { getWeather, rainExpectedSoon } from "../lib/agent/weather";
+import { defaultSources } from "../lib/agent/proactive";
 
 const results: { name: string; ok: boolean; detail: string }[] = [];
 
@@ -95,6 +96,16 @@ await check("clean_disk_junk", async () => cleanDiskJunk(["temp_files", "thumbna
 await check("run_code powershell + node", async () => [await runCode("powershell", "Write-Output (2+2)"), await runCode("node", "console.log(6*7)")].join(" | "));
 await check("get_system_info", async () => getSystemInfo());
 await check("get_weather (live Open-Meteo)", async () => getWeather("Pune, India"));
+
+await check("rain forecast (live hourly Open-Meteo)", async () => {
+  const rain = await rainExpectedSoon(3, "Pune, India");
+  return rain ? `rain likely at ${rain.at.toLocaleTimeString()} (${rain.chance}%)` : "no rain expected in the next 3 hours";
+});
+await check("free disk space via fs.statfs", async () => {
+  const { freeBytes, totalBytes } = await defaultSources.disk();
+  if (!(totalBytes > 0 && freeBytes > 0 && freeBytes <= totalBytes)) throw new Error(`implausible: ${freeBytes}/${totalBytes}`);
+  return `${Math.round(freeBytes / 1024 ** 3)} GB free of ${Math.round(totalBytes / 1024 ** 3)} GB`;
+});
 
 for (const r of results) {
   console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}\n      ${r.detail.replace(/\n/g, "\n      ")}`);
