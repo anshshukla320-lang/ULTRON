@@ -16,20 +16,25 @@ New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
 $exe = Get-ChildItem -Path $dir -Recurse -Include "whisper-cli.exe", "main.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $exe) {
-  Write-Host "Finding the latest whisper.cpp release..."
-  $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest" -Headers @{ "User-Agent" = "ULTRON" }
-  # Asset names change between releases (e.g. whisper-bin-x64.zip), so pick
-  # the plain 64-bit Windows CPU build by pattern rather than exact name.
+  Write-Host "Finding the newest whisper.cpp release with a Windows build..."
+  # The very latest release sometimes has no binaries attached (yet), so
+  # walk back through recent releases to the newest one that does. Asset
+  # names also change, so the plain 64-bit Windows CPU build is picked by
+  # pattern, skipping GPU builds.
   $gpu = "cublas|cuda|vulkan|blas|clblast|opencl|sycl|arm64|win32|x86\b"
-  $zips = $release.assets | Where-Object { $_.name -like "*.zip" -and $_.name -notmatch $gpu }
-  $asset = ($zips | Where-Object { $_.name -eq "whisper-bin-x64.zip" }) |
-    Select-Object -First 1
-  if (-not $asset) { $asset = $zips | Where-Object { $_.name -match "^whisper.*(bin|win).*x64.*\.zip$" } | Select-Object -First 1 }
-  if (-not $asset) { $asset = $zips | Where-Object { $_.name -match "win" -and $_.name -match "x64" } | Select-Object -First 1 }
-  if (-not $asset) {
-    $names = ($release.assets | ForEach-Object { $_.name }) -join ", "
-    throw "Couldn't find a Windows x64 build in whisper.cpp $($release.tag_name). Available: $names"
+  $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/whisper.cpp/releases?per_page=15" -Headers @{ "User-Agent" = "ULTRON" }
+  $asset = $null
+  $release = $null
+  foreach ($r in $releases) {
+    if ($r.draft -or $r.prerelease) { continue }
+    $zips = $r.assets | Where-Object { $_.name -like "*.zip" -and $_.name -notmatch $gpu }
+    $asset = ($zips | Where-Object { $_.name -eq "whisper-bin-x64.zip" }) | Select-Object -First 1
+    if (-not $asset) { $asset = $zips | Where-Object { $_.name -match "^whisper.*(bin|win).*x64.*\.zip$" } | Select-Object -First 1 }
+    if (-not $asset) { $asset = $zips | Where-Object { $_.name -match "win" -and $_.name -match "x64" } | Select-Object -First 1 }
+    if ($asset) { $release = $r; break }
   }
+  if (-not $asset) { throw "None of the last $($releases.Count) whisper.cpp releases has a Windows x64 build attached." }
+  Write-Host "whisper.cpp $($release.tag_name)"
   Write-Host "Using $($asset.name)"
   $zip = Join-Path $env:TEMP $asset.name
   Write-Host "Downloading whisper.cpp $($release.tag_name)..."
