@@ -97,7 +97,7 @@ export default function VoiceAgent() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   // Which speech recognizer to use (Settings > Hearing); null until loaded.
-  const [stt, setStt] = useState<{ engine: "browser" | "whisper"; language: "en" | "hi" | "auto" } | null>(null);
+  const [stt, setStt] = useState<{ engine: "browser" | "whisper"; language: "en" | "hi" | "auto"; whisperInstalled?: boolean } | null>(null);
 
   useEffect(() => {
     fetch("/api/stt")
@@ -391,7 +391,14 @@ export default function VoiceAgent() {
     recognition.lang =
       stt.language === "hi" ? "hi-IN" : navigator.language.toLowerCase().startsWith("en") ? navigator.language : "en-US";
 
+    // Chrome's recognizer runs on Google's servers; when they can't be
+    // reached it fails with "network" over and over. Say so once, retry
+    // with growing pauses, and switch to local Whisper if it's installed.
+    let networkFailures = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
     recognition.onresult = (event) => {
+      networkFailures = 0;
       let finalText = "";
       let interimText = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -472,6 +479,21 @@ export default function VoiceAgent() {
         setStatusNow("unsupported");
         return;
       }
+      if (event.error === "network") {
+        networkFailures++;
+        if (stt.engine === "browser" && stt.whisperInstalled) {
+          pushLog("action", "Chrome's speech service can't be reached — switching to local Whisper.");
+          setStt({ ...stt, engine: "whisper" });
+          return;
+        }
+        if (networkFailures === 1) {
+          pushLog(
+            "error",
+            "Can't reach Chrome's speech service (it needs internet access to Google). Check your connection, VPN or firewall, and use Chrome itself rather than Brave/Opera — or install local Whisper (scripts\\install-whisper.ps1) to hear offline. Retrying quietly…",
+          );
+        }
+        return;
+      }
       pushLog("error", `Mic error: ${event.error}`);
     };
 
@@ -480,10 +502,19 @@ export default function VoiceAgent() {
     recognition.onend = () => {
       setInterim("");
       if (mutedRef.current || unsupportedRef.current || statusRef.current === "confirm") return;
-      try {
-        recognition.start();
-      } catch {
-        // ignore
+      const restart = () => {
+        retryTimer = null;
+        if (mutedRef.current || unsupportedRef.current || statusRef.current === "confirm") return;
+        try {
+          recognition.start();
+        } catch {
+          // ignore
+        }
+      };
+      if (networkFailures > 0) {
+        retryTimer = setTimeout(restart, Math.min(30_000, 1000 * 2 ** Math.min(networkFailures, 5)));
+      } else {
+        restart();
       }
     };
 
@@ -495,6 +526,7 @@ export default function VoiceAgent() {
     }
 
     return () => {
+      if (retryTimer) clearTimeout(retryTimer);
       recognition.onend = null;
       recognition.abort();
     };
