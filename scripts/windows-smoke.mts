@@ -23,6 +23,7 @@ import { readClipboard, writeClipboard } from "../lib/agent/clipboard";
 import { getCricketScores, getNews, getStockPrices } from "../lib/agent/liveInfo";
 import { enrollClip, ownerScore } from "../lib/agent/voiceId";
 import { detectWake } from "../lib/voiceCommands";
+import { DEFAULT_SETTINGS } from "../lib/agent/settings";
 import { existsSync, readFileSync } from "node:fs";
 
 const results: { name: string; ok: boolean; detail: string }[] = [];
@@ -279,8 +280,9 @@ await check("voice lock: learns one voice, rejects another", async () => {
   const same = await ownerScore(await sapiWav("Play some relaxing music and lower the volume a little bit, please.", owner));
   const diff = await ownerScore(await sapiWav("Play some relaxing music and lower the volume a little bit, please.", other));
   if (same === null || diff === null) throw new Error("not enrolled");
-  if (!(same >= 0.5 && diff < 0.5)) throw new Error(`owner ${same.toFixed(2)}, other ${diff.toFixed(2)} — threshold 0.5 doesn't separate them`);
-  return `${owner}: ${same.toFixed(2)} (accepted) vs ${other}: ${diff.toFixed(2)} (rejected)`;
+  const threshold = DEFAULT_SETTINGS.voiceLockThreshold;
+  if (!(same >= threshold && diff < threshold)) throw new Error(`owner ${same.toFixed(2)}, other ${diff.toFixed(2)} — default threshold ${threshold} doesn't separate them`);
+  return `${owner}: ${same.toFixed(2)} (accepted) vs ${other}: ${diff.toFixed(2)} (rejected) at the default ${threshold}`;
 });
 
 await check("Whisper transcribes Windows' own voice", async () => {
