@@ -15,8 +15,10 @@ export function requireWindows(feature: string): void {
 export async function runPowerShell(script: string, env: Record<string, string> = {}, timeoutMs = 30_000): Promise<string> {
   const { stdout } = await execFileAsync(
     "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-    { env: { ...process.env, ...env }, windowsHide: true, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+    // Windows PowerShell writes stdout in the console's legacy code page, so
+    // anything non-English (Hindi, accents) came back as "?" — force UTF-8.
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n${script}`],
+    { env: { ...process.env, ...env }, windowsHide: true, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, encoding: "utf8" },
   );
   return stdout.trim();
 }
