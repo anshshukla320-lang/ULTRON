@@ -3,9 +3,10 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Asked for only when first needed (calling, texting, contacts, location). -->
-    <uses-permission android:name="android.permission.CALL_PHONE" />
-    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- Asked for only when first needed. No SMS or call permissions: texts and
+         calls open the Messages app / dialler ready to go, and the user taps
+         send or call (Play Protect blocks sideloaded apps that can do either
+         by themselves). -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

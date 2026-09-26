@@ -27,6 +27,7 @@ class Assistant(
     private val pcFactory: (AssistantConfig, CookieStore) -> PcBrain = { c, k -> PcBrain(c.pcUrl, c.pcPassword, k) },
     private val phoneFactory: (AssistantConfig) -> PhoneBrain = { c -> PhoneBrain(c.apiKey) },
     private val clock: () -> Long = System::currentTimeMillis,
+    private val tools: List<ToolSpec> = PhoneTools.all,
 ) {
     private var pc: PcBrain? = null
     private var pcKey: AssistantConfig? = null
@@ -93,7 +94,7 @@ class Assistant(
 
     /** A pure phone tool call, with the on-screen confirmation for calls and texts. */
     private fun runTool(ui: AssistantUi, name: String, input: Map<String, Any?>): ToolResult {
-        val spec = PhoneTools.byName(name) ?: return ToolResult("There is no phone tool called \"$name\".", true)
+        val spec = tools.firstOrNull { it.name == name } ?: return ToolResult("There is no phone tool called \"$name\".", true)
         if (name == "phone_remember") {
             val fact = input["fact"]?.toString()?.trim().orEmpty()
             if (fact.isEmpty()) return ToolResult("Nothing to remember.", true)
@@ -105,7 +106,6 @@ class Assistant(
         if (spec.confirm) {
             val (title, detail) = when (name) {
                 "phone_call" -> "Call ${input["who"]}?" to ""
-                "phone_send_sms" -> "Text ${input["to"]}?" to input["message"].toString()
                 else -> "Allow ${name.removePrefix("phone_").replace('_', ' ')}?" to input.toString()
             }
             if (!ui.confirm(title, detail)) {
@@ -160,7 +160,7 @@ class Assistant(
             }
             val saved = pcHistory.toMutableList()
             try {
-                reply = pcBrain(c).turn(pcHistory, text, PhoneTools.forPc(), { n, i -> runTool(ui, n, i) }, tracking)
+                reply = pcBrain(c).turn(pcHistory, text, tools.filterNot { it.phoneBrainOnly }, { n, i -> runTool(ui, n, i) }, tracking)
                 answeredBy = Brain.PC
             } catch (e: PcUnavailable) {
                 pcOkAt = 0
@@ -174,7 +174,7 @@ class Assistant(
             if (!c.hasOwnBrain) throw SetupProblem(if (c.hasPc) "I can't reach the PC right now, sir, and there's no API key set for the phone to think on its own." else "Add an Anthropic API key in settings.")
             carryOver(Brain.PHONE)
             ui.onBrain(Brain.PHONE)
-            reply = phoneBrain(c).turn(phoneHistory, text, memory.facts(), PhoneTools.all, { n, i -> runTool(ui, n, i) }, ui)
+            reply = phoneBrain(c).turn(phoneHistory, text, memory.facts(), tools, { n, i -> runTool(ui, n, i) }, ui)
             answeredBy = Brain.PHONE
         }
         lastBrain = answeredBy

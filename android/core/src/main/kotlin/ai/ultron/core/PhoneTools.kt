@@ -33,17 +33,15 @@ object PhoneTools {
     val all: List<ToolSpec> = listOf(
         ToolSpec(
             "phone_call",
-            "Phone someone from the user's phone. `who` is a contact name or a number. The user confirms on screen first.",
+            "Phone someone: opens the dialler with their number ready; the user taps call. `who` is a contact name or a number.",
             mapOf("who" to str("Contact name or phone number")),
             listOf("who"),
-            confirm = true,
         ),
         ToolSpec(
             "phone_send_sms",
-            "Send a text message (SMS) from the user's phone. Say the exact message and recipient in your reply; the user confirms on screen first.",
+            "Write a text message (SMS) on the user's phone: opens Messages with the text ready to someone; the user taps send. Say the message and recipient in your reply.",
             mapOf("to" to str("Contact name or phone number"), "message" to str("Exact text to send")),
             listOf("to", "message"),
-            confirm = true,
         ),
         ToolSpec(
             "phone_whatsapp",

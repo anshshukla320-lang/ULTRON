@@ -209,8 +209,10 @@ from your browser when Android asks.
 **Talk to it:** tap the orb; tap again to interrupt. It keeps listening for a
 follow-up after each reply (switch off in settings). Start talking in one tap
 from the Quick Settings tile (pull down the shade → ✎ → add ULTRON) or by
-long-pressing the app icon → *Talk to ULTRON*. Calls and texts always show a
-Yes/No on screen first; WhatsApp opens with the message ready for you to send.
+long-pressing the app icon → *Talk to ULTRON*. For calls, texts and WhatsApp,
+ULTRON opens the dialler or messaging app with everything filled in and you
+tap call or send. (It never sends or calls by itself: Google Play Protect
+blocks sideloaded apps that can.)
 
 **Signing (once, so updates install over the old app):** the build is signed
 with a key kept in this repository's secrets. Without it each build gets a new

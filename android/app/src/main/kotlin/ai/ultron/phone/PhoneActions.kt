@@ -21,7 +21,6 @@ import android.os.Build
 import android.os.CancellationSignal
 import android.provider.AlarmClock
 import android.provider.ContactsContract
-import android.telephony.SmsManager
 import android.view.KeyEvent
 import java.util.Calendar
 import java.util.Locale
@@ -104,23 +103,20 @@ class PhoneActions(private val host: ActionHost, private val prefs: Prefs) : Pho
 
     private fun call(who: String): ToolResult {
         val (name, number) = numberFor(who)
-        val uri = Uri.parse("tel:${Uri.encode(number)}")
-        return if (host.ensurePermissions(Manifest.permission.CALL_PHONE)) {
-            host.startActivityOnUi(Intent(Intent.ACTION_CALL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            ToolResult("Calling $name.")
-        } else {
-            host.startActivityOnUi(Intent(Intent.ACTION_DIAL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            ToolResult("Opened the dialler with $name's number — the user taps call.")
-        }
+        host.startActivityOnUi(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(number)}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        return ToolResult("Opened the dialler with $name's number — the user taps call.")
     }
 
+    /** Opens the Messages app with the text written; the user taps send. (Sending
+     *  directly needs the SMS permission, which Play Protect blocks for apps
+     *  installed outside the Play Store.) */
     private fun sms(to: String, message: String): ToolResult {
         val (name, number) = numberFor(to)
-        if (!host.ensurePermissions(Manifest.permission.SEND_SMS)) throw SecurityException("I need permission to send texts.")
-        val manager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) ctx.getSystemService(SmsManager::class.java) else @Suppress("DEPRECATION") SmsManager.getDefault()
-        val parts = manager.divideMessage(message)
-        manager.sendMultipartTextMessage(number, null, parts, null, null)
-        return ToolResult("Texted $name: \"$message\".")
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${Uri.encode(number)}"))
+            .putExtra("sms_body", message)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        host.startActivityOnUi(intent)
+        return ToolResult("Opened Messages with the text to $name ready — the user taps send.")
     }
 
     private fun whatsapp(to: String, message: String): ToolResult {

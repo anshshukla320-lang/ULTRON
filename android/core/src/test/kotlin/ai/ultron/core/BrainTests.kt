@@ -198,10 +198,10 @@ class AssistantTest {
         claude.shutdown()
     }
 
-    private fun assistant(fake: FakePc, memory: MemoryStore, box: PhoneToolbox, now: () -> Long = { System.currentTimeMillis() }): Assistant {
+    private fun assistant(fake: FakePc, memory: MemoryStore, box: PhoneToolbox, tools: List<ToolSpec> = PhoneTools.all, now: () -> Long = { System.currentTimeMillis() }): Assistant {
         pcServer.dispatcher = fake
         val cfg = AssistantConfig(pcServer.url("/").toString().trimEnd('/'), "secret", "sk-test")
-        return Assistant({ cfg }, box, memory, InMemoryCookies(), phoneFactory = { PhoneBrain(it.apiKey, claude.url("/").toString().trimEnd('/')) }, clock = now)
+        return Assistant({ cfg }, box, memory, InMemoryCookies(), phoneFactory = { PhoneBrain(it.apiKey, claude.url("/").toString().trimEnd('/')) }, clock = now, tools = tools)
     }
 
     @Test fun `uses the PC when it's there, the phone when it isn't, and carries the conversation over`() {
@@ -236,15 +236,18 @@ class AssistantTest {
         assertTrue(memory.pendingFacts().isEmpty())
     }
 
-    @Test fun `texts need a yes on screen`() {
+    @Test fun `a tool marked confirm needs a yes on screen`() {
         val fake = FakePc(ArrayDeque()).also { it.down = true }
-        claude.enqueue(Sse.response("tool_use", Sse.ToolUse("toolu_1", "phone_send_sms", """{"to": "Mum", "message": "On my way"}""")))
-        claude.enqueue(Sse.response("end_turn", Sse.Text("Okay, I won't send it.")))
+        val guarded = PhoneTools.all.map { if (it.name == "phone_torch") it.copy(confirm = true) else it }
+        claude.enqueue(Sse.response("tool_use", Sse.ToolUse("toolu_1", "phone_torch", """{"on": true}""")))
+        claude.enqueue(Sse.response("end_turn", Sse.Text("Okay, leaving it off.")))
         val box = FakeToolbox()
         val ui = FakeUi(approve = false)
-        assistant(fake, InMemoryStore(), box).ask("text mum on my way", ui)
-        assertEquals(listOf("Text Mum?" to "On my way"), ui.confirms)
-        assertTrue(box.calls.isEmpty(), "declined — nothing sent")
+        assistant(fake, InMemoryStore(), box, tools = guarded).ask("torch on", ui)
+        assertEquals("Allow torch?", ui.confirms.single().first)
+        assertTrue(box.calls.isEmpty(), "declined — not run")
+        // Calls and texts open the dialler/Messages for the user to finish, so they don't ask twice.
+        assertTrue(PhoneTools.all.none { it.confirm })
     }
 
     @Test fun `nothing set up is a setup problem`() {
