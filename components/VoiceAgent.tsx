@@ -5,6 +5,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { stripSpeechMarkup } from "@/lib/speechSegments";
 import { SentenceChunker } from "@/lib/sentenceChunker";
 import { SpeechPlayer } from "@/lib/speechPlayer";
+import { WhisperRecognizer } from "@/lib/whisperRecognizer";
 import { detectWake, isRepeatOf, isStopCommand, leadingWakeCommand, looksLikeEcho, stripLeadingWake } from "@/lib/voiceCommands";
 
 type AgentStatus = "wake" | "listening" | "thinking" | "speaking" | "confirm" | "unsupported";
@@ -95,6 +96,15 @@ export default function VoiceAgent() {
   const [interim, setInterim] = useState("");
   const [log, setLog] = useState<LogEntry[]>([]);
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
+  // Which speech recognizer to use (Settings > Hearing); null until loaded.
+  const [stt, setStt] = useState<{ engine: "browser" | "whisper"; language: "en" | "hi" | "auto" } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/stt")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setStt(d ?? { engine: "browser", language: "en" }))
+      .catch(() => setStt({ engine: "browser", language: "en" }));
+  }, []);
 
   const messagesRef = useRef<Anthropic.MessageParam[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -368,7 +378,8 @@ export default function VoiceAgent() {
   }, [announceReminders]);
 
   useEffect(() => {
-    const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!stt) return;
+    const Ctor = stt.engine === "whisper" ? (WhisperRecognizer as unknown as new () => SpeechRecognition) : window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!Ctor) {
       setStatusNow("unsupported");
       return;
@@ -376,7 +387,9 @@ export default function VoiceAgent() {
     const recognition = new Ctor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    // Chrome needs a locale; Whisper takes the language from Settings itself.
+    recognition.lang =
+      stt.language === "hi" ? "hi-IN" : navigator.language.toLowerCase().startsWith("en") ? navigator.language : "en-US";
 
     recognition.onresult = (event) => {
       let finalText = "";
@@ -485,7 +498,7 @@ export default function VoiceAgent() {
       recognition.onend = null;
       recognition.abort();
     };
-  }, [handleUtterance, pushLog, clearFollowUpTimer, interrupt, goIdle, armFollowUpWindow, setStatusNow]);
+  }, [stt, handleUtterance, pushLog, clearFollowUpTimer, interrupt, goIdle, armFollowUpWindow, setStatusNow]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -543,6 +556,9 @@ export default function VoiceAgent() {
 
   return (
     <div className="hud agent-panel">
+      <a href="/settings" className="agent-settings-link" title="Settings, memory, costs">
+        ⚙ SETTINGS
+      </a>
       <div className={`agent-status agent-status-${status}`}>{muted ? "MUTED" : statusLabel[status]}</div>
 
       {interim && <div className="agent-interim">“{interim}”</div>}
@@ -577,7 +593,14 @@ export default function VoiceAgent() {
                   {t.input.code}
                 </pre>
               )}
-              {typeof t.input.to === "string" && (
+              {typeof t.input.task === "string" && <div className="confirm-detail">{t.input.task}</div>}
+              {typeof t.input.message === "string" && (
+                <div className="confirm-detail">
+                  To: {String(t.input.to ?? "")}
+                  <div>{t.input.message}</div>
+                </div>
+              )}
+              {typeof t.input.to === "string" && typeof t.input.message !== "string" && (
                 <div className="confirm-detail">
                   To: {t.input.to}
                   {typeof t.input.subject === "string" && <div>Subject: {t.input.subject}</div>}

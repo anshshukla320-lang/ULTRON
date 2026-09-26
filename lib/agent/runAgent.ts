@@ -2,6 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { AUTO_EXECUTE, TOOLS, executeTool, type ToolName, type ToolOutput } from "./tools";
 import { stashPendingAction, takePendingAction, type PendingToolUse } from "./pendingActions";
 import { repairToolPairs, stripImages, trimHistory } from "./conversationHistory";
+import { recordUsage, type Feature } from "./usage";
 
 // Sonnet answers everything, because for a voice assistant time-to-first-
 // word matters. For genuinely hard questions it consults Opus 5 through the
@@ -79,8 +80,12 @@ export interface AgentDeps {
   client: Pick<Anthropic, "beta">;
   system: Anthropic.TextBlockParam[];
   /** Overridable for tests. */
-  execute?: (name: ToolName, input: Record<string, unknown>) => Promise<ToolOutput>;
+  execute?: (name: ToolName, input: Record<string, unknown>, ctx?: { signal?: AbortSignal }) => Promise<ToolOutput>;
   signal?: AbortSignal;
+  /** From the control panel; false never offers the advisor. */
+  advisor?: boolean;
+  /** Which usage bucket this conversation's cost is counted under. */
+  feature?: Feature;
 }
 
 interface ReadyResult {
@@ -94,13 +99,19 @@ function outputText(output: ToolOutput): string {
 }
 
 function toolResultBlock(r: ReadyResult): Anthropic.ToolResultBlockParam {
+  const o = r.output;
   const content: Anthropic.ToolResultBlockParam["content"] =
-    typeof r.output === "string"
-      ? r.output
-      : [
-          { type: "image", source: { type: "base64", media_type: r.output.image.mediaType, data: r.output.image.data } },
-          { type: "text", text: r.output.text },
-        ];
+    typeof o === "string"
+      ? o
+      : "image" in o
+        ? [
+            { type: "image", source: { type: "base64", media_type: o.image.mediaType, data: o.image.data } },
+            { type: "text", text: o.text },
+          ]
+        : [
+            { type: "document", source: { type: "base64", media_type: o.document.mediaType, data: o.document.data } },
+            { type: "text", text: o.text },
+          ];
   return { type: "tool_result", tool_use_id: r.id, content, ...(r.isError ? { is_error: true } : {}) };
 }
 
@@ -137,7 +148,7 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
         continue;
       }
       try {
-        const output = await execute(tu.name as ToolName, tu.input);
+        const output = await execute(tu.name as ToolName, tu.input, { signal: deps.signal });
         blocks.push(toolResultBlock({ id: tu.id, output }));
         yield { type: "action", action: { name: tu.name, input: tu.input, output: outputText(output), status: "done" } };
       } catch (err) {
@@ -166,7 +177,7 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     let response: Anthropic.Beta.Messages.BetaMessage;
-    const useAdvisor = advisorWanted() || historyUsesAdvisor(working);
+    const useAdvisor = (deps.advisor !== false && advisorWanted()) || historyUsesAdvisor(working);
     try {
       const stream = deps.client.beta.messages.stream(
         {
@@ -195,6 +206,7 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
         }
       }
       response = await stream.finalMessage();
+      void recordUsage(deps.feature ?? "chat", response.model ?? MODEL, response.usage);
     } catch (err) {
       if (deps.signal?.aborted) return; // the user said "stop" — nothing to report
       const status = (err as { status?: number }).status;
@@ -249,7 +261,7 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
         confirmBlocks.push(b);
       } else {
         try {
-          const output = await execute(b.name as ToolName, input);
+          const output = await execute(b.name as ToolName, input, { signal: deps.signal });
           readyResults.push({ id: b.id, output });
           yield { type: "action", action: { name: b.name, input, output: outputText(output), status: "done" } };
         } catch (err) {

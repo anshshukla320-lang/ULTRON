@@ -195,3 +195,9 @@ export async function takeDue(now = new Date()): Promise<DueItem[]> {
     return due;
   });
 }
+
+/** For the control panel. */
+export async function listRemindersRaw(): Promise<{ items: Reminder[]; briefingTime: string | null }> {
+  const s = await readStore();
+  return { items: [...s.items].sort((a, b) => a.dueAt.localeCompare(b.dueAt)), briefingTime: s.briefing?.time ?? null };
+}

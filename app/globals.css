@@ -427,3 +427,137 @@ body {
     width: calc(100vw - 48px);
   }
 }
+
+/* ── Settings / control panel ─────────────────────────────── */
+.settings-page {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  padding: 24px max(16px, calc(50vw - 380px)) 60px;
+  color: #ffcc88;
+  font-size: 13px;
+  background: radial-gradient(ellipse at top, rgba(60, 25, 0, 0.6), #000 60%);
+}
+
+.set-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.set-header h1 {
+  font-size: 15px;
+  letter-spacing: 0.2em;
+  color: #ffaa30;
+}
+
+.settings-page section {
+  border: 1px solid rgba(255, 170, 48, 0.35);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: rgba(20, 10, 0, 0.55);
+}
+
+.settings-page h2 {
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #ff9933;
+  margin-bottom: 8px;
+}
+
+.set-row,
+.set-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid rgba(255, 170, 48, 0.12);
+}
+
+.set-row small,
+.set-item small,
+.set-small {
+  display: block;
+  opacity: 0.6;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.set-item small {
+  display: inline;
+  margin-left: 6px;
+}
+
+.settings-page input,
+.settings-page select {
+  background: #000;
+  border: 1px solid rgba(255, 170, 48, 0.45);
+  color: #ffcc66;
+  padding: 5px 7px;
+  font-family: inherit;
+  border-radius: 3px;
+  min-width: 0;
+}
+
+.set-item input {
+  flex: 1;
+}
+
+.settings-page select {
+  min-width: 190px;
+}
+
+.settings-page input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #ff9933;
+  flex: none;
+}
+
+.set-error {
+  color: #ff6655;
+  margin-bottom: 10px;
+}
+
+.set-empty {
+  opacity: 0.55;
+}
+
+.set-danger {
+  margin-top: 8px;
+  border-color: rgba(255, 90, 60, 0.6);
+  color: #ff8866;
+}
+
+.set-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 70px;
+  margin: 10px 0;
+}
+
+.set-bars div {
+  flex: 1;
+  background: linear-gradient(to top, rgba(255, 140, 20, 0.5), #ffaa30);
+  border-radius: 2px 2px 0 0;
+}
+
+.agent-settings-link {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: #ffaa30;
+  opacity: 0.7;
+  text-decoration: none;
+}
+
+.agent-settings-link:hover {
+  opacity: 1;
+}

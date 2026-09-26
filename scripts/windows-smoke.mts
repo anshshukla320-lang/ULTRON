@@ -13,8 +13,16 @@ import { scanDiskJunk, cleanDiskJunk } from "../lib/agent/diskCleanup";
 import { runCode } from "../lib/agent/codeRunner";
 import { getWeather, rainExpectedSoon } from "../lib/agent/weather";
 import { defaultSources } from "../lib/agent/proactive";
+import { showNotification, speakOnPc } from "../lib/agent/nativeOutput";
+import { windowsExecutor, comboToVks, keyToVk } from "../lib/agent/computerUse";
+import { findWhisper, transcribeWav } from "../lib/agent/whisperStt";
+import { runPowerShell } from "../lib/agent/powershell";
+import { readFileSync } from "node:fs";
 
 const results: { name: string; ok: boolean; detail: string }[] = [];
+// A check can report SKIP when the CI machine lacks the hardware (e.g. no
+// audio device); that's reported but doesn't fail the run.
+const SKIP = "SKIP: ";
 
 async function check(name: string, fn: () => Promise<string>) {
   try {
@@ -107,8 +115,76 @@ await check("free disk space via fs.statfs", async () => {
   return `${Math.round(freeBytes / 1024 ** 3)} GB free of ${Math.round(totalBytes / 1024 ** 3)} GB`;
 });
 
+await check("Windows notification (background mode)", async () => {
+  await showNotification("ULTRON smoke test", "Background notifications work.");
+  return "shown";
+});
+
+await check("speak through the PC's speakers (Windows voice)", async () => {
+  try {
+    await speakOnPc("Background speech works.");
+    return "spoken";
+  } catch (err) {
+    return `${SKIP}${err instanceof Error ? err.message.split("\n")[0] : err}`;
+  }
+});
+
+await check("computer use: real mouse, keyboard and screenshots", async () => {
+  const g = await windowsExecutor.geometry();
+  await openApp("notepad");
+  await sleep(2500);
+  const shot = path.join(os.tmpdir(), "ultron-cu-smoke.jpg");
+  const text = "ULTRON computer use check: 123 & ünïcödé नमस्ते";
+  await windowsExecutor.run(
+    [
+      { op: "move", x: g.left + Math.round(g.width / 2), y: g.top + Math.round(g.height / 2) },
+      { op: "type", text },
+      { op: "keys", vks: comboToVks("ctrl+a"), up: false },
+      { op: "keys", vks: comboToVks("ctrl+a"), up: true },
+      { op: "keys", vks: comboToVks("ctrl+c"), up: false },
+      { op: "keys", vks: comboToVks("ctrl+c"), up: true },
+      { op: "sleep", ms: 300 },
+      { op: "shot", x0: g.left, y0: g.top, x1: g.left + g.width, y1: g.top + g.height, w: Math.round(g.width * g.scale), h: Math.round(g.height * g.scale), file: shot },
+    ],
+    { failsafe: false },
+  );
+  const clip = (await runPowerShell("Get-Clipboard -Raw")).trim();
+  try {
+    execFileSync("taskkill", ["/IM", "notepad.exe", "/F"], { stdio: "ignore" });
+  } catch {
+    // already gone
+  }
+  if (clip !== text) throw new Error(`typed text came back as "${clip}"`);
+  const jpeg = readFileSync(shot);
+  if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8) throw new Error("screenshot isn't a JPEG");
+  const { cursor } = await windowsExecutor.run([{ op: "move", x: g.left + 200, y: g.top + 150 }, { op: "cursor" }], { failsafe: false });
+  if (cursor[0] !== `${g.left + 200},${g.top + 150}`) throw new Error(`cursor at ${cursor[0]}`);
+  const corner = await windowsExecutor.run([{ op: "move", x: g.left, y: g.top }], { failsafe: false });
+  const blocked = await windowsExecutor.run([{ op: "keys", vks: [keyToVk("a")], up: false }], { failsafe: true });
+  if (!blocked.failsafe) throw new Error("mouse in the corner didn't trigger the emergency stop");
+  void corner;
+  return `screen ${g.width}x${g.height} (scale ${g.scale.toFixed(2)}); typed Unicode text round-tripped; screenshot ${Math.round(jpeg.length / 1024)} KB; failsafe works`;
+});
+
+await check("Whisper transcribes Windows' own voice", async () => {
+  if (!(await findWhisper())) return `${SKIP}Whisper not installed`;
+  const wav = path.join(os.tmpdir(), "ultron-stt-smoke.wav");
+  await runPowerShell(
+    `Add-Type -AssemblyName System.Speech
+$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo 16000, ([System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen), ([System.Speech.AudioFormat.AudioChannel]::Mono)
+$s.SetOutputToWaveFile($env:ULTRON_WAV, $fmt)
+$s.Speak("What is the weather like today?")
+$s.Dispose()`,
+    { ULTRON_WAV: wav },
+  );
+  const text = await transcribeWav(readFileSync(wav), "en");
+  if (!/weather/i.test(text)) throw new Error(`heard "${text}"`);
+  return `heard: "${text}"`;
+});
+
 for (const r of results) {
-  console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}\n      ${r.detail.replace(/\n/g, "\n      ")}`);
+  console.log(`${!r.ok ? "FAIL" : r.detail.startsWith(SKIP) ? "SKIP" : "PASS"}  ${r.name}\n      ${r.detail.replace(/\n/g, "\n      ")}`);
 }
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

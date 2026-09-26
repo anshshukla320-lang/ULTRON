@@ -53,3 +53,31 @@ export async function searchContacts(query: string, maxResults = 10): Promise<st
   if (matches.length === 0) return `No contacts found matching "${query}".`;
   return matches.slice(0, maxResults).join("\n");
 }
+
+/** Contacts whose name matches, with every phone number they have — for
+ *  messaging someone by name. */
+export async function findContactPhones(query: string): Promise<{ name: string; phones: string[] }[]> {
+  const token = await getAccessToken();
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const found: { name: string; phones: string[] }[] = [];
+  let pageToken: string | undefined;
+  let scanned = 0;
+  do {
+    const params = new URLSearchParams({ personFields: "names,phoneNumbers", pageSize: "200" });
+    if (pageToken) params.set("pageToken", pageToken);
+    const res = await fetch(`https://people.googleapis.com/v1/people/me/connections?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`Google Contacts request failed (${res.status}): ${await res.text()}`);
+    const data = (await res.json()) as { connections?: Person[]; nextPageToken?: string };
+    for (const person of data.connections ?? []) {
+      scanned += 1;
+      const name = person.names?.[0]?.displayName ?? "";
+      const phones = (person.phoneNumbers ?? []).map((p) => p.value ?? "").filter(Boolean);
+      if (name.toLowerCase().includes(needle) && phones.length) found.push({ name, phones });
+    }
+    pageToken = data.nextPageToken;
+  } while (pageToken && scanned < MAX_SCAN);
+  return found;
+}

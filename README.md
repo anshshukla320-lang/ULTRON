@@ -82,6 +82,29 @@ A few things to try:
   yourself changes how it answers: shorter when you're rushed, owning the
   mistake when you're frustrated, warmer when you're chatting.
 
+**More it can do:**
+
+- **Runs in the background.** `scripts\ultron-background.ps1` starts ULTRON
+  hidden with a tray icon; `scripts\install-startup.ps1` makes it start
+  with Windows. Reminders, notices and the briefing then arrive as Windows
+  notifications and are spoken even with no browser tab open.
+- **Uses the computer for you.** "Fill in this form", "rename these files" —
+  it looks at the screen and clicks and types (Claude computer use). Every
+  task asks first; say "stop" or push the mouse into the top-left corner to
+  halt it. It won't enter passwords or payment details, buy, send or delete.
+- **Settings page** (`/settings`): what it remembers about you, past
+  conversations, reminders, feature switches, quiet hours, and what it
+  spends on the Claude API each day (with an optional daily cap).
+- **Your documents.** "What does my lease say about notice?" searches PDFs,
+  Word and text files in the workspace and any folders listed in
+  `ULTRON_DOCUMENT_FOLDERS`.
+- **Messaging.** "Tell Priya I'm running late on WhatsApp" (WhatsApp desktop,
+  confirmed first). Text ULTRON from your phone through a Telegram bot.
+- **Smart home** through Home Assistant — lights, fans, climate, scenes;
+  locks, alarms and garage doors need confirmation.
+- **Better hearing.** `scripts\install-whisper.ps1`, then Settings >
+  Hearing > Whisper: local, offline, more accurate, understands Hindi.
+
 Anything risky (sending email, running code, installing apps, shutting
 down, deleting files) shows a confirm box first. Setup for keys and
 accounts is in `.env.example`.

@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { rememberNewFacts } from "./memory";
+import { recordUsage } from "./usage";
 
 // Episodic memory: a short summary of every finished conversation, so
 // ULTRON can pick up threads later ("how did the interview go?") the way a
@@ -146,6 +147,7 @@ export async function consolidateConversation(
     messages: [{ role: "user", content: `Conversation (${now.toLocaleString("en-US")}):\n\n${transcript}` }],
     output_config: { format: { type: "json_schema", schema: SUMMARY_SCHEMA } },
   });
+  void recordUsage("memory", SUMMARY_MODEL, response.usage);
   const text = response.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "{}";
   const parsed = JSON.parse(text) as Partial<Summary>;
 
@@ -155,4 +157,23 @@ export async function consolidateConversation(
   const episode: Episode = { id: randomUUID().slice(0, 8), at: now.toISOString(), summary, ...(parsed.mood?.trim() ? { mood: parsed.mood.trim() } : {}) };
   await appendEpisode(episode);
   return { episode, factsAdded };
+}
+
+/** For the control panel. */
+export async function listEpisodes(): Promise<Episode[]> {
+  return readEpisodes();
+}
+
+export async function deleteEpisode(id: string): Promise<boolean> {
+  let found = false;
+  const next = queue.then(async () => {
+    const all = await readEpisodes();
+    const remaining = all.filter((e) => e.id !== id);
+    found = remaining.length !== all.length;
+    await fs.mkdir(path.dirname(episodesPath()), { recursive: true });
+    await fs.writeFile(episodesPath(), JSON.stringify(remaining, null, 2), "utf-8");
+  });
+  queue = next.catch(() => {});
+  await next;
+  return found;
 }

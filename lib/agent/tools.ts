@@ -1,4 +1,4 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import * as actions from "./systemActions";
 import * as gmail from "./gmailClient";
 import { placeHealthReportCall } from "./callReport";
@@ -23,6 +23,12 @@ import { setTimer, setReminder, listReminders, cancelReminder, setDailyBriefing 
 import { morningBriefing } from "./briefing";
 import { searchEpisodes } from "./episodes";
 import { setProactive } from "./proactive";
+import { usageReport } from "./usage";
+import { searchDocuments, readDocument } from "./documents";
+import { sendWhatsApp } from "./whatsapp";
+import { listDevices, controlDevice, controlSecurityDevice } from "./homeAssistant";
+import { operateComputer } from "./computerUse";
+import { getSettings } from "./settings";
 import { getWeather } from "./weather";
 import { lookAtScreen } from "./screen";
 import { setVolume, mediaControl, lockPc, setBrightness, powerAction, cancelShutdown } from "./pcControls";
@@ -97,7 +103,15 @@ export type ToolName =
   | "scan_disk_junk"
   | "clean_disk_junk"
   | "recall_conversations"
-  | "set_proactive";
+  | "set_proactive"
+  | "usage_report"
+  | "search_documents"
+  | "read_document"
+  | "send_whatsapp"
+  | "smart_home_devices"
+  | "smart_home_control"
+  | "smart_home_security"
+  | "operate_computer";
 
 /** Tools in here run immediately. Anything not listed requires the user to
  *  click "Confirm" in the UI before it executes. */
@@ -164,6 +178,12 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "scan_disk_junk",
   "recall_conversations",
   "set_proactive",
+  "usage_report",
+  "search_documents",
+  "read_document",
+  "smart_home_devices",
+  "smart_home_control",
+  // send_whatsapp and smart_home_security need confirmation too.
   // power_action and clean_disk_junk deliberately need confirmation.
 ]);
 
@@ -859,6 +879,86 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "usage_report",
+    description: "How much ULTRON has spent on the Claude API today and over the last 30 days, broken down by feature.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "search_documents",
+    description: "Search the user's documents (PDF, Word, text) in the ULTRON workspace and any folders they've allowed, and return the most relevant passages with file names. Use before answering questions about their own papers, contracts, notes, etc.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "What to look for, in plain words" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "read_document",
+    description: "Read a whole document (PDFs are shown to you as the real document, including tables and scans). Use a path returned by search_documents or list_files.",
+    input_schema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Path relative to the workspace, or an absolute path inside an allowed folder" } },
+      required: ["path"],
+    },
+  },
+  {
+    name: "send_whatsapp",
+    description: "Send a WhatsApp message through the WhatsApp desktop app. `to` is a contact name (looked up in Google Contacts) or a phone number. Always read the exact message back in your reply before this runs.",
+    input_schema: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Contact name or phone number" },
+        message: { type: "string", description: "Exact text to send" },
+      },
+      required: ["to", "message"],
+    },
+  },
+  {
+    name: "smart_home_devices",
+    description: "List the user's smart-home devices from Home Assistant (lights, switches, fans, climate, covers, locks, media players, scenes) with their current state and entity ids.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Optional words to filter by, e.g. 'bedroom' or 'light'" } },
+      required: [],
+    },
+  },
+  {
+    name: "smart_home_control",
+    description: "Control an everyday smart-home device: on, off, toggle, brightness for lights, set_temperature for climate, open/close/stop for blinds, play/pause for media players, activate a scene. Not for locks, alarms or garage/doors (use smart_home_security).",
+    input_schema: {
+      type: "object",
+      properties: {
+        entity_id: { type: "string", description: "From smart_home_devices, e.g. light.bedroom" },
+        action: { type: "string", description: "on, off, toggle, open, close, stop, play, pause, set_temperature" },
+        brightness: { type: "number", description: "Lights only: 0-100" },
+        temperature: { type: "number", description: "Climate only, with set_temperature" },
+      },
+      required: ["entity_id", "action"],
+    },
+  },
+  {
+    name: "smart_home_security",
+    description: "Lock/unlock a door, arm/disarm an alarm, or open/close a garage or door. Always needs the user's confirmation.",
+    input_schema: {
+      type: "object",
+      properties: {
+        entity_id: { type: "string" },
+        action: { type: "string", description: "lock, unlock, arm, disarm, open, close" },
+      },
+      required: ["entity_id", "action"],
+    },
+  },
+  {
+    name: "operate_computer",
+    description:
+      "Carry out a multi-step task on the user's PC by looking at the screen and using the mouse and keyboard — e.g. filling in a form, renaming files in Explorer, changing a setting in an app, finding something on a website. Needs the user's confirmation. Describe the task completely and concretely (which app/site, what to do, when to stop). It will not enter passwords or payment details, buy things, send messages, or delete files. Prefer a dedicated tool when one exists — this is slower.",
+    input_schema: {
+      type: "object",
+      properties: { task: { type: "string", description: "The complete task, in plain words" } },
+      required: ["task"],
+    },
+  },
+  {
     name: "call_health_report",
     description:
       "Place a real phone call (via Twilio) to the user's phone number and read out a spoken summary of this PC's health — disk space, memory, CPU load, and recent system errors — plus any important unread Gmail messages. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and USER_PHONE_NUMBER to be set in .env.local. This places a real, billed phone call, so it always requires the user's explicit confirmation before it runs.",
@@ -875,9 +975,16 @@ function parseSex(value: unknown): "male" | "female" {
 }
 
 /** Most tools return text; look_at_screen also returns an image for Claude to see. */
-export type ToolOutput = string | { text: string; image: { mediaType: "image/png" | "image/jpeg"; data: string } };
+export type ToolOutput =
+  | string
+  | { text: string; image: { mediaType: "image/png" | "image/jpeg"; data: string } }
+  | { text: string; document: { mediaType: "application/pdf"; data: string } };
 
-export async function executeTool(name: ToolName, input: Record<string, unknown>): Promise<ToolOutput> {
+export async function executeTool(
+  name: ToolName,
+  input: Record<string, unknown>,
+  ctx: { signal?: AbortSignal } = {},
+): Promise<ToolOutput> {
   switch (name) {
     case "open_app":
       return actions.openApp(String(input.name ?? ""));
@@ -1038,6 +1145,32 @@ export async function executeTool(name: ToolName, input: Record<string, unknown>
         typeof input.enabled === "boolean" ? input.enabled : input.enabled === "true" ? true : input.enabled === "false" ? false : undefined,
         input.quiet_hours !== undefined ? String(input.quiet_hours) : undefined,
       );
+    case "usage_report":
+      return usageReport();
+    case "search_documents":
+      return searchDocuments(String(input.query ?? ""));
+    case "read_document":
+      return readDocument(String(input.path ?? ""));
+    case "send_whatsapp":
+      return sendWhatsApp(String(input.to ?? ""), String(input.message ?? ""));
+    case "smart_home_devices":
+      return listDevices(input.query ? String(input.query) : "");
+    case "smart_home_control":
+      return controlDevice(
+        String(input.entity_id ?? ""),
+        String(input.action ?? ""),
+        input.brightness !== undefined ? Number(input.brightness) : undefined,
+        input.temperature !== undefined ? Number(input.temperature) : undefined,
+      );
+    case "smart_home_security":
+      return controlSecurityDevice(String(input.entity_id ?? ""), String(input.action ?? ""));
+    case "operate_computer": {
+      if (!(await getSettings()).computerUse) throw new Error("Operating the computer is switched off in Settings.");
+      return operateComputer(String(input.task ?? ""), {
+        client: new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }),
+        signal: ctx.signal,
+      });
+    }
     case "call_health_report":
       return placeHealthReportCall();
     case "spotify_play":

@@ -11,7 +11,7 @@ const MEMORY_PATH = path.join(CONFIG_DIR, "memory.json");
 const MAX_STORED_ENTRIES = 300;
 const MAX_PROMPT_ENTRIES = 40;
 
-interface MemoryEntry {
+export interface MemoryEntry {
   text: string;
   savedAt: string;
 }
@@ -96,4 +96,21 @@ export async function rememberNewFacts(facts: string[]): Promise<number> {
   }
   if (added) await writeMemory(entries.slice(-MAX_STORED_ENTRIES));
   return added;
+}
+
+/** For the control panel. */
+export async function listFacts(): Promise<MemoryEntry[]> {
+  return readMemory();
+}
+
+export async function deleteFactExact(text: string): Promise<boolean> {
+  const entries = await readMemory();
+  const remaining = entries.filter((e) => e.text !== text);
+  if (remaining.length === entries.length) return false;
+  await writeMemory(remaining);
+  return true;
+}
+
+export async function clearAllFacts(): Promise<void> {
+  await writeMemory([]);
 }

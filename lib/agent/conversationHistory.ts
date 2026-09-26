@@ -63,11 +63,17 @@ export function stripImages(messages: Anthropic.MessageParam[]): Anthropic.Messa
     if (m.role !== "user" || typeof m.content === "string") return m;
     let changed = false;
     const content = m.content.map((b) => {
-      if (b.type !== "tool_result" || !Array.isArray(b.content) || !b.content.some((c) => c.type === "image")) return b;
+      if (b.type !== "tool_result" || !Array.isArray(b.content) || !b.content.some((c) => c.type === "image" || c.type === "document")) return b;
       changed = true;
       return {
         ...b,
-        content: b.content.map((c) => (c.type === "image" ? { type: "text" as const, text: "[screenshot no longer attached]" } : c)),
+        content: b.content.map((c) =>
+          c.type === "image"
+            ? { type: "text" as const, text: "[screenshot no longer attached]" }
+            : c.type === "document"
+              ? { type: "text" as const, text: "[document no longer attached — read it again if needed]" }
+              : c,
+        ),
       };
     });
     return changed ? { ...m, content } : m;
