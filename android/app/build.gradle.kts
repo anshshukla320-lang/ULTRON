@@ -12,7 +12,7 @@ val keystorePath: String? = System.getenv("ANDROID_KEYSTORE_FILE")?.takeIf { fil
 
 android {
     namespace = "ai.ultron.phone"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "ai.ultron.phone"
