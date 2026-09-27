@@ -7,7 +7,9 @@ import com.anthropic.core.http.StreamResponse
 import com.anthropic.errors.AnthropicServiceException
 import com.anthropic.errors.UnauthorizedException
 import com.anthropic.helpers.MessageAccumulator
+import com.anthropic.models.messages.Base64ImageSource
 import com.anthropic.models.messages.CacheControlEphemeral
+import com.anthropic.models.messages.ImageBlockParam
 import com.anthropic.models.messages.ContentBlockParam
 import com.anthropic.models.messages.MessageCreateParams
 import com.anthropic.models.messages.MessageParam
@@ -19,6 +21,7 @@ import com.anthropic.models.messages.Tool
 import com.anthropic.models.messages.ToolResultBlockParam
 import com.anthropic.models.messages.WebSearchTool20260209
 import java.time.Duration
+import java.util.Base64
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -56,9 +59,58 @@ class PhoneBrain(
         runTool: (String, Map<String, Any?>) -> ToolResult,
         ui: AssistantUi,
         now: ZonedDateTime = ZonedDateTime.now(),
+        imageJpeg: ByteArray? = null,
     ): String {
         cancelled = false
-        history += MessageParam.builder().role(MessageParam.Role.USER).content(userText).build()
+        val start = history.size
+        history += if (imageJpeg == null) {
+            MessageParam.builder().role(MessageParam.Role.USER).content(userText).build()
+        } else {
+            MessageParam.builder().role(MessageParam.Role.USER)
+                .contentOfBlockParams(listOf(ContentBlockParam.ofImage(image(imageJpeg)), ContentBlockParam.ofText(userText)))
+                .build()
+        }
+        try {
+            return loop(history, facts, tools, runTool, ui, now)
+        } finally {
+            // Photos matter for the turn they were taken in; resending them on
+            // every later turn would cost a lot for nothing.
+            forgetImages(history, start)
+        }
+    }
+
+    private fun image(jpeg: ByteArray): ImageBlockParam = ImageBlockParam.builder()
+        .source(Base64ImageSource.builder().mediaType(Base64ImageSource.MediaType.IMAGE_JPEG).data(Base64.getEncoder().encodeToString(jpeg)).build())
+        .build()
+
+    private fun forgetImages(history: MutableList<MessageParam>, from: Int) {
+        for (i in from until history.size) {
+            val m = history[i]
+            val blocks = if (m.content().isBlockParams()) m.content().asBlockParams() else continue
+            if (blocks.none { it.isImage() || (it.isToolResult() && it.asToolResult().content().map { c -> c.isBlocks() && c.asBlocks().any { b -> b.isImage() } }.orElse(false)) }) continue
+            val kept = blocks.map { b ->
+                when {
+                    b.isImage() -> ContentBlockParam.ofText("[a photo was shown here]")
+                    b.isToolResult() && b.asToolResult().content().map { c -> c.isBlocks() }.orElse(false) -> {
+                        val tr = b.asToolResult()
+                        val text = tr.content().get().asBlocks().filter { it.isText() }.joinToString(" ") { it.asText().text() }
+                        ContentBlockParam.ofToolResult(tr.toBuilder().content("[photo] $text").build())
+                    }
+                    else -> b
+                }
+            }
+            history[i] = m.toBuilder().contentOfBlockParams(kept).build()
+        }
+    }
+
+    private fun loop(
+        history: MutableList<MessageParam>,
+        facts: List<String>,
+        tools: List<ToolSpec>,
+        runTool: (String, Map<String, Any?>) -> ToolResult,
+        ui: AssistantUi,
+        now: ZonedDateTime,
+    ): String {
         val spoken = StringBuilder()
         for (step in 0 until MAX_STEPS) {
             val params = buildParams(history, facts, tools, now)
@@ -109,9 +161,13 @@ class PhoneBrain(
                         @Suppress("UNCHECKED_CAST")
                         val input = (use._input().convert(Map::class.java) as? Map<String, Any?>) ?: emptyMap()
                         val r = if (tools.none { it.name == use.name() }) ToolResult("There is no tool named \"${use.name()}\".", true) else runTool(use.name(), input)
-                        ContentBlockParam.ofToolResult(
-                            ToolResultBlockParam.builder().toolUseId(use.id()).content(r.text).isError(r.isError).build(),
-                        )
+                        val result = ToolResultBlockParam.builder().toolUseId(use.id()).isError(r.isError)
+                        if (r.imageJpeg != null) {
+                            result.contentOfBlocks(listOf(ToolResultBlockParam.Content.Block.ofImage(image(r.imageJpeg)), ToolResultBlockParam.Content.Block.ofText(r.text)))
+                        } else {
+                            result.content(r.text)
+                        }
+                        ContentBlockParam.ofToolResult(result.build())
                     }
                     if (results.isEmpty()) return spoken.toString().trim()
                     history += MessageParam.builder().role(MessageParam.Role.USER).contentOfBlockParams(results).build()

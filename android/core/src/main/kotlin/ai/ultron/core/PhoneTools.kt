@@ -116,6 +116,46 @@ object PhoneTools {
             listOf("text"),
         ),
         ToolSpec(
+            "phone_camera",
+            "Look through the phone's camera: the camera opens, the user points it and takes the photo, and you see it. For 'what am I looking at', 'read this', 'translate this sign', 'what's wrong with this plant'.",
+            mapOf("why" to str("What you'll look for, shown to the user while they aim")),
+        ),
+        ToolSpec(
+            "phone_save_place",
+            "Remember a place for location triggers: the phone's current location, or an address. E.g. 'this is home', 'save the office as 12 MG Road, Pune'.",
+            mapOf("name" to str("home, office, gym, market…"), "address" to str("Leave out to use where the phone is now")),
+            listOf("name"),
+        ),
+        ToolSpec(
+            "phone_location_trigger",
+            "Do something when the phone arrives at or leaves a saved place: run one of the user's ULTRON routines (e.g. lights on when arriving home) and/or show a reminder ('buy milk when I'm near the market').",
+            mapOf(
+                "place" to str("A saved place name"),
+                "when" to enumOf("arrive", "leave"),
+                "routine" to str("Name of an ULTRON routine to run"),
+                "reminder" to str("Reminder text to show"),
+            ),
+            listOf("place", "when"),
+        ),
+        ToolSpec("phone_list_places", "The saved places and their location triggers."),
+        ToolSpec(
+            "phone_delete_place",
+            "Forget a saved place and its triggers.",
+            mapOf("name" to str("Place name")),
+            listOf("name"),
+        ),
+        ToolSpec(
+            "phone_meeting_notes",
+            "Record a meeting on the phone's microphone and have ULTRON on the PC write notes (summary, decisions, action items). start when asked; stop when they say the meeting is over — the notes come back to speak.",
+            mapOf("action" to enumOf("start", "stop"), "title" to str("What the meeting is, if said")),
+            listOf("action"),
+        ),
+        ToolSpec(
+            "phone_health",
+            "Steps, sleep and heart rate from the phone (Health Connect), per day.",
+            mapOf("days" to num("How many days back, default 7")),
+        ),
+        ToolSpec(
             "phone_remember",
             "Save a lasting fact about the user (a preference, a person, a plan). It's shared with ULTRON on the PC next time they connect.",
             mapOf("fact" to str("The fact, in one sentence")),

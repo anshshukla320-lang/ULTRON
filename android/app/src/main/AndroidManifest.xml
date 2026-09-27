@@ -11,10 +11,25 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- Location triggers with the app closed ("Allow all the time"). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- ULTRON's announcements, place reminders. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Recording a meeting with the screen off. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Health Connect, read only. -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
 
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
     <!-- Android 11+ only lets an app see the apps and services it declares. -->
     <queries>
@@ -32,6 +47,8 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="google.navigation" />
         </intent>
+        <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
+        <package android:name="com.google.android.apps.healthdata" />
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
     </queries>
@@ -67,6 +84,65 @@
             android:exported="false"
             android:label="@string/settings"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- Health Connect's "why does ULTRON want this?" link (Android 13 and older)… -->
+        <activity
+            android:name=".HealthRationaleActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+        <!-- …and on Android 14+. -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:targetActivity=".HealthRationaleActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- The camera app writes the photo here. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Every ~15 minutes: announcements from the PC, the widget, health. -->
+        <service
+            android:name=".SyncJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <service
+            android:name=".MeetingService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <receiver android:name=".BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".PlaceReceiver" android:exported="false" />
+
+        <receiver android:name=".UltronWidget" android:exported="false" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/ultron_widget_info" />
+        </receiver>
 
         <!-- Quick Settings tile: pull down the shade, tap ULTRON, talk. -->
         <service

@@ -3,4 +3,5 @@
     <string name="app_name">ULTRON</string>
     <string name="settings">ULTRON settings</string>
     <string name="talk">Talk to ULTRON</string>
+    <string name="widget_description">Talk to ULTRON, see what\'s coming up, run routines</string>
 </resources>

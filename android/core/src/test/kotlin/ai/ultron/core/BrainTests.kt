@@ -282,3 +282,47 @@ class SpeechTest {
         assertEquals("what time is it", VoiceCommands.stripWake("Hey Ultron, what time is it"))
     }
 }
+
+@Suppress("UNCHECKED_CAST")
+class PhotoTest {
+    private val server = MockWebServer().apply { start() }
+
+    @AfterTest fun stop() = server.shutdown()
+
+    @Test fun `a photo goes to Claude once, then only a note of it stays in the history`() {
+        server.enqueue(Sse.response("tool_use", Sse.ToolUse("toolu_1", "phone_camera", "{}")))
+        server.enqueue(Sse.response("end_turn", Sse.Text("That's a tulsi plant, sir.")))
+        server.enqueue(Sse.response("end_turn", Sse.Text("Water it twice a week.")))
+        val brain = PhoneBrain("sk-test", server.url("/").toString().trimEnd('/'))
+        val history = mutableListOf<MessageParam>()
+        val jpeg = byteArrayOf(-1, -40, -1, 1, 2, 3)
+        val reply = brain.turn(history, "what plant is this?", emptyList(), PhoneTools.all, { _, _ -> ToolResult("Photo taken.", imageJpeg = jpeg) }, FakeUi())
+        assertEquals("That's a tulsi plant, sir.", reply)
+        server.takeRequest()
+        val second = server.takeRequest().body.readUtf8()
+        assertTrue(second.contains("\"type\":\"image\"") && second.contains("/9j/AQID"), "the photo reached Claude inside the tool result")
+
+        brain.turn(history, "how often should I water it?", emptyList(), PhoneTools.all, { _, _ -> ToolResult("") }, FakeUi())
+        val third = server.takeRequest().body.readUtf8()
+        assertTrue(!third.contains("/9j/AQID"), "not resent on the next turn")
+        assertTrue(third.contains("[photo] Photo taken."))
+    }
+
+    @Test fun `a photo asked about through the PC is sent as an image block`() {
+        val fake = FakePc(ArrayDeque(listOf(ndjson(mapOf("type" to "text", "text" to "A receipt for ₹840."), mapOf("type" to "done", "messages" to listOf<Any>(), "reply" to "", "pending" to null)))))
+        server.dispatcher = fake
+        PcBrain(server.url("/").toString().trimEnd('/'), "secret", InMemoryCookies())
+            .turn(mutableListOf(), "what's the total?", PhoneTools.forPc(), { _, _ -> ToolResult("") }, FakeUi(), byteArrayOf(1, 2, 3))
+        val user = (fake.agentBodies.single()["messages"] as List<Map<String, Any?>>).last()
+        val blocks = user["content"] as List<Map<String, Any?>>
+        assertEquals(listOf("image", "text"), blocks.map { it["type"] })
+        assertEquals("AQID", (blocks[0]["source"] as Map<String, Any?>)["data"])
+    }
+
+    @Test fun `wake word detection`() {
+        assertEquals("what time is it", VoiceCommands.afterWake("Hey Ultron, what time is it"))
+        assertEquals("", VoiceCommands.afterWake("ok ultron"))
+        assertEquals("lights off", VoiceCommands.afterWake("hey ultra on lights off"))
+        assertEquals(null, VoiceCommands.afterWake("the movie ultron was fun"))
+    }
+}

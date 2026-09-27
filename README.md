@@ -137,6 +137,17 @@ A few things to try:
 - **Custom voice.** Settings > Voice: pick a voice and speed.
   `scripts\install-piper-voice.ps1 butler` (or jarvis, us-male, us-female,
   uk-female, narrator) adds more.
+- **Journal and daily recap.** "Note in my journal: …" adds to today's page;
+  every evening (Settings > Journal time, default 21:30) ULTRON writes a short
+  recap of your day from your conversations, reminders, meetings, screen time
+  and health. "What did I do last Tuesday?" reads it back.
+- **Meeting notes.** "ULTRON, take notes for this meeting" records on the PC
+  page (or the phone), transcribes locally with Whisper as it goes, and at
+  "the meeting's over" writes a summary, decisions and action items (saved in
+  your documents, action items added to Google Tasks). Needs local Whisper.
+- **Family mode.** Settings > Family: record each person's voice. ULTRON
+  knows who's speaking, and only you can send email or WhatsApp, run code,
+  change settings, read your mail or control the computer.
 - **Phone app.** A real Android app with ULTRON's mind — see below.
 
 Anything risky (sending email, running code, installing apps, shutting
@@ -213,6 +224,28 @@ long-pressing the app icon → *Talk to ULTRON*. For calls, texts and WhatsApp,
 ULTRON opens the dialler or messaging app with everything filled in and you
 tap call or send. (It never sends or calls by itself: Google Play Protect
 blocks sideloaded apps that can.)
+
+**More on the phone:**
+
+- **Notifications.** Reminders, timers, briefings and alerts from ULTRON on
+  the PC show up as phone notifications (within ~15 minutes, app closed), or
+  are spoken straight away while the app is open.
+- **Camera.** Tap 📷, take a photo and ask about it ("what is this?", "read
+  this", "translate the sign") — or ULTRON opens the camera itself when you
+  ask "what am I looking at?".
+- **Places.** "This is home", "save the office as 12 MG Road", then "when I get
+  home, run movie mode" or "remind me to buy milk when I'm near the market".
+  Set location to *Allow all the time* (⚙ → Permissions) so it works with the
+  app closed. Routines that need a confirm can't run this way.
+- **"Hey ULTRON".** ⚙ → *Listen for "Hey ULTRON"* while the app is open; with
+  *keep the screen on while charging*, a phone on its charger works like a
+  smart speaker.
+- **Home-screen widget.** Tap to talk, what's coming up, and buttons for your
+  routines.
+- **Meeting notes** from the phone's microphone, even with the screen off.
+- **Health.** Steps, sleep and heart rate from Health Connect (Google Fit,
+  Samsung Health, Fitbit…), read only: "how did I sleep this week?"; also in
+  the morning briefing and the evening recap.
 
 **Signing (once, so updates install over the old app):** the build is signed
 with a key kept in this repository's secrets. Without it each build gets a new

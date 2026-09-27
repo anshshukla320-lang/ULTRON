@@ -16,7 +16,10 @@ interface AssistantUi {
     fun confirm(title: String, detail: String): Boolean
 }
 
-data class ToolResult(val text: String, val isError: Boolean = false)
+/** A tool's answer; `imageJpeg` lets a tool hand Claude a photo (the camera). */
+class ToolResult(val text: String, val isError: Boolean = false, val imageJpeg: ByteArray? = null) {
+    override fun toString() = "ToolResult($text, isError=$isError${if (imageJpeg != null) ", image ${imageJpeg.size} B" else ""})"
+}
 
 /** Runs phone_* tools on the phone (implemented by the Android app). */
 fun interface PhoneToolbox {

@@ -1,9 +1,9 @@
 package ai.ultron.phone
 
+import ai.ultron.core.PcBrain
 import ai.ultron.core.PhoneToolbox
 import ai.ultron.core.ToolResult
 import android.Manifest
-import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -11,14 +11,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
-import android.location.Geocoder
-import android.location.Location
-import android.location.LocationManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
-import android.os.CancellationSignal
 import android.provider.AlarmClock
 import android.provider.ContactsContract
 import android.view.KeyEvent
@@ -33,6 +29,10 @@ interface ActionHost {
     /** Blocks (off the main thread) until the user answers Android's permission prompt. */
     fun ensurePermissions(vararg permissions: String): Boolean
     fun startActivityOnUi(intent: Intent)
+    /** Opens the camera; the JPEG (downscaled) once the user takes the photo, null if they don't. */
+    fun takePhoto(why: String): ByteArray?
+    /** Android's Health Connect permission screen; true if anything was allowed. */
+    fun requestHealthAccess(): Boolean
 }
 
 /** The phone_* tools, done with Android's own APIs. Runs on a background thread. */
@@ -56,6 +56,13 @@ class PhoneActions(private val host: ActionHost, private val prefs: Prefs) : Pho
             "phone_volume" -> volume(str(input, "action"), (input["level"] as? Number)?.toInt())
             "phone_media" -> media(str(input, "action"))
             "phone_copy" -> copy(str(input, "text"))
+            "phone_camera" -> camera(input["why"]?.toString())
+            "phone_save_place" -> savePlace(str(input, "name"), input["address"]?.toString()?.trim()?.ifEmpty { null })
+            "phone_location_trigger" -> locationTrigger(str(input, "place"), str(input, "when"), input["routine"]?.toString()?.trim()?.ifEmpty { null }, input["reminder"]?.toString()?.trim()?.ifEmpty { null })
+            "phone_list_places" -> ToolResult(Places(ctx).describe())
+            "phone_delete_place" -> ToolResult(if (Places(ctx).delete(str(input, "name"))) "Forgotten." else "There's no saved place called \"${input["name"]}\".")
+            "phone_meeting_notes" -> meeting(str(input, "action"), input["title"]?.toString().orEmpty())
+            "phone_health" -> health((input["days"] as? Number)?.toInt() ?: 7)
             else -> ToolResult("The phone can't do \"$name\".", true)
         }
     } catch (e: Exception) {
@@ -210,31 +217,12 @@ class PhoneActions(private val host: ActionHost, private val prefs: Prefs) : Pho
         return ToolResult(if (on) "Torch on." else "Torch off.")
     }
 
-    @SuppressLint("MissingPermission") // checked by ensurePermissions
     private fun location(): ToolResult {
         host.ensurePermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         // "Approximate" location is enough; GPS only when precise was allowed.
         if (!ctx.hasPermissions(Manifest.permission.ACCESS_COARSE_LOCATION)) throw SecurityException("I need location permission for that.")
-        val precise = ctx.hasPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
-        val lm = ctx.getSystemService(LocationManager::class.java)
-        val providers = listOfNotNull(if (precise) LocationManager.GPS_PROVIDER else null, LocationManager.NETWORK_PROVIDER)
-            .filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
-        if (providers.isEmpty()) throw IllegalStateException("Location is switched off on the phone.")
-        var loc: Location? = null
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val latch = CountDownLatch(1)
-            val cancel = CancellationSignal()
-            lm.getCurrentLocation(providers.last(), cancel, ctx.mainExecutor) { l -> loc = l; latch.countDown() }
-            if (!latch.await(15, TimeUnit.SECONDS)) cancel.cancel()
-        }
-        if (loc == null) loc = providers.mapNotNull { lm.getLastKnownLocation(it) }.maxByOrNull { it.time }
-        val l = loc ?: throw IllegalStateException("Couldn't get a location fix.")
-        val address = try {
-            @Suppress("DEPRECATION")
-            Geocoder(ctx, Locale.getDefault()).getFromLocation(l.latitude, l.longitude, 1)?.firstOrNull()?.getAddressLine(0)
-        } catch (_: Exception) {
-            null
-        }
+        val l = Places.here(ctx)
+        val address = Places.addressOf(ctx, l)
         return ToolResult("${address ?: "Unknown address"} (${"%.5f".format(Locale.ROOT, l.latitude)}, ${"%.5f".format(Locale.ROOT, l.longitude)}, accurate to about ${l.accuracy.toInt()} m).")
     }
 
@@ -270,6 +258,80 @@ class PhoneActions(private val host: ActionHost, private val prefs: Prefs) : Pho
         am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, key))
         am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, key))
         return ToolResult("Done.")
+    }
+
+    // ── Camera ────────────────────────────────────────────────────────────
+
+    private fun camera(why: String?): ToolResult {
+        val jpeg = host.takePhoto(why?.ifBlank { null } ?: "Point the camera and take the photo") ?: return ToolResult("The user didn't take a photo.", true)
+        return ToolResult("Here's the photo the user just took.", imageJpeg = jpeg)
+    }
+
+    // ── Places and location triggers ──────────────────────────────────────
+
+    private fun savePlace(name: String, address: String?): ToolResult {
+        val (lat, lon) = if (address != null) {
+            Places.geocode(ctx, address)
+        } else {
+            host.ensurePermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (!ctx.hasPermissions(Manifest.permission.ACCESS_FINE_LOCATION)) throw SecurityException("I need precise location permission to save where you are.")
+            Places.here(ctx).let { it.latitude to it.longitude }
+        }
+        Places(ctx).savePlace(name, lat, lon)
+        val where = address ?: Places.addressOf(ctx, android.location.Location("").apply { latitude = lat; longitude = lon }) ?: "here"
+        return ToolResult("Saved \"$name\" ($where).")
+    }
+
+    private fun locationTrigger(place: String, on: String, routine: String?, reminder: String?): ToolResult {
+        require(on == "arrive" || on == "leave") { "\"when\" should be arrive or leave." }
+        require(routine != null || reminder != null) { "Give a routine to run, a reminder to show, or both." }
+        if (routine != null && !prefs.config().hasPc) throw IllegalStateException("Routines run on ULTRON on the PC, and the PC isn't set up in the app.")
+        if (!host.ensurePermissions(Manifest.permission.ACCESS_FINE_LOCATION)) throw SecurityException("Location triggers need precise location permission.")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) host.ensurePermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val p = Places(ctx).addTrigger(place, Places.Trigger(on, routine, reminder))
+        // Android 10+: noticing arrivals with the app closed needs "Allow all the time".
+        val background = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || host.ensurePermissions(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        Places(ctx).registerAll()
+        val what = listOfNotNull(routine?.let { "run \"$it\"" }, reminder?.let { "remind you: $it" }).joinToString(" and ")
+        return ToolResult(
+            "When you ${if (on == "arrive") "arrive at" else "leave"} ${p.name}, I'll $what." +
+                if (background) "" else " Note: location is only allowed while the app is open, so this won't work with ULTRON closed — set Location to \"Allow all the time\" in the app's settings.",
+        )
+    }
+
+    // ── Meetings ──────────────────────────────────────────────────────────
+
+    private fun meeting(action: String, title: String): ToolResult {
+        val c = prefs.config()
+        if (!c.hasPc) throw IllegalStateException("Meeting notes are written by ULTRON on the PC, and the PC isn't set up in the app.")
+        val pc = PcBrain(c.pcUrl, c.pcPassword, prefs)
+        return when (action) {
+            "start" -> {
+                if (MeetingService.recording) return ToolResult("Already recording the meeting.")
+                if (!host.ensurePermissions(Manifest.permission.RECORD_AUDIO)) throw SecurityException("I need the microphone for that.")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) host.ensurePermissions(Manifest.permission.POST_NOTIFICATIONS)
+                val id = pc.meetingStart(title)
+                MeetingService.start(ctx, id, title)
+                ToolResult("Recording the meeting on the phone. The screen can go off; it keeps recording. Tell me when it's over.")
+            }
+            "stop" -> {
+                MeetingService.stop()
+                ToolResult(pc.meetingStop().ifBlank { "The notes are saved on the PC." })
+            }
+            else -> throw IllegalArgumentException("action should be start or stop.")
+        }
+    }
+
+    // ── Health ────────────────────────────────────────────────────────────
+
+    private fun health(days: Int): ToolResult {
+        if (!Health.available(ctx)) throw IllegalStateException("Health Connect isn't on this phone (it's built into Android 14 and later; on older phones install it from the Play Store).")
+        if (!Health.granted(ctx) && !host.requestHealthAccess()) throw SecurityException("ULTRON wasn't allowed to read health data.")
+        val data = Health.days(ctx, days)
+        // Pass them on to the PC too, for the briefing and the journal.
+        val c = prefs.config()
+        if (c.hasPc) runCatching { PcBrain(c.pcUrl, c.pcPassword, prefs).pushHealth(data) }
+        return ToolResult(Health.describe(data))
     }
 
     private companion object {

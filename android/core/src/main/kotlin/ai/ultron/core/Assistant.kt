@@ -143,7 +143,8 @@ class Assistant(
     }
 
     /** One thing the user said. Returns the spoken reply (already streamed to the UI). */
-    fun ask(text: String, ui: AssistantUi): String {
+    /** `imageJpeg`: a photo the user took to ask about ("what's this?"). */
+    fun ask(text: String, ui: AssistantUi, imageJpeg: ByteArray? = null): String {
         val c = config()
         if (!c.hasPc && !c.hasOwnBrain) throw SetupProblem("Open settings and add your PC's address and password, or an Anthropic API key.")
         var reply: String? = null
@@ -160,7 +161,7 @@ class Assistant(
             }
             val saved = pcHistory.toMutableList()
             try {
-                reply = pcBrain(c).turn(pcHistory, text, tools.filterNot { it.phoneBrainOnly }, { n, i -> runTool(ui, n, i) }, tracking)
+                reply = pcBrain(c).turn(pcHistory, text, tools.filterNot { it.phoneBrainOnly }, { n, i -> runTool(ui, n, i) }, tracking, imageJpeg)
                 answeredBy = Brain.PC
             } catch (e: PcUnavailable) {
                 pcOkAt = 0
@@ -174,11 +175,11 @@ class Assistant(
             if (!c.hasOwnBrain) throw SetupProblem(if (c.hasPc) "I can't reach the PC right now, sir, and there's no API key set for the phone to think on its own." else "Add an Anthropic API key in settings.")
             carryOver(Brain.PHONE)
             ui.onBrain(Brain.PHONE)
-            reply = phoneBrain(c).turn(phoneHistory, text, memory.facts(), tools, { n, i -> runTool(ui, n, i) }, ui)
+            reply = phoneBrain(c).turn(phoneHistory, text, memory.facts(), tools, { n, i -> runTool(ui, n, i) }, ui, imageJpeg = imageJpeg)
             answeredBy = Brain.PHONE
         }
         lastBrain = answeredBy
-        transcript += text to reply!!
+        transcript += (if (imageJpeg != null) "[photo] $text" else text) to reply!!
         return reply
     }
 

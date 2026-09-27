@@ -2,7 +2,9 @@ package ai.ultron.phone
 
 import ai.ultron.core.InMemoryCookies
 import ai.ultron.core.PcBrain
+import android.Manifest
 import android.app.Activity
+import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.util.TypedValue
@@ -59,7 +61,36 @@ class SettingsActivity : Activity() {
         val speak = switch(column, "Speak replies out loud", prefs.speakReplies)
         val country = field(column, "Country code for WhatsApp numbers", prefs.countryCode, InputType.TYPE_CLASS_NUMBER)
 
-        column.addView(note("Tip: add ULTRON to Quick Settings (pull down the shade → edit ✎) or long-press the app icon → \"Talk to ULTRON\" to start talking in one tap."))
+        val wake = switch(column, "Listen for \"Hey ULTRON\" while the app is open", prefs.wakeWord)
+        val awake = switch(column, "…and keep the screen on while charging", prefs.stayAwakeCharging)
+        column.addView(note("With both on, a phone on its charger works like a smart speaker: leave ULTRON open and just say \"Hey ULTRON, …\"."))
+
+        column.addView(heading("PERMISSIONS"))
+        column.addView(note("Each is asked for the first time it's needed anyway; set them up here in one go if you like."))
+        column.addView(button("ALLOW NOTIFICATIONS") {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        })
+        column.addView(note("Reminders, timers and alerts from ULTRON on your PC appear on the phone within ~15 minutes, even with the app closed."))
+        column.addView(button("ALLOW LOCATION ALL THE TIME") {
+            if (!hasPermissions(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), 2)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                requestPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), 3)
+            }
+        })
+        column.addView(note("For location triggers (\"when I get home, turn the lights on\"). Tap twice: first precise location, then \"Allow all the time\"."))
+        val healthNote = note("")
+        column.addView(button("ALLOW HEALTH DATA") {
+            if (Health.available(this)) {
+                @Suppress("DEPRECATION")
+                startActivityForResult(Health.permissionIntent(this), 4)
+            } else {
+                runCatching { startActivity(Health.installIntent()) }.onFailure { healthNote.text = "Install Health Connect from the Play Store first." }
+            }
+        })
+        column.addView(healthNote.apply { text = "Steps, sleep and heart rate from Health Connect (Google Fit, Samsung Health, Fitbit…), read only — for \"how did I sleep?\" and your morning briefing." })
+
+        column.addView(note("Tip: add ULTRON to Quick Settings (pull down the shade → edit ✎) or long-press the app icon → \"Talk to ULTRON\" to start talking in one tap. There's a home-screen widget too (long-press the home screen → Widgets → ULTRON)."))
 
         column.addView(button("SAVE") {
             prefs.pcUrl = url.text.toString()
@@ -68,7 +99,10 @@ class SettingsActivity : Activity() {
             prefs.handsFree = handsFree.isChecked
             prefs.speakReplies = speak.isChecked
             prefs.countryCode = country.text.toString()
+            prefs.wakeWord = wake.isChecked
+            prefs.stayAwakeCharging = awake.isChecked
             prefs.set(null) // new address or password: sign in again
+            if (prefs.config().hasPc) SyncJob.schedule(this)
             finish()
         })
     }

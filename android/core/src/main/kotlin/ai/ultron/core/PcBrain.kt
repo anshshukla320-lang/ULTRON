@@ -7,6 +7,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.Base64
 import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -114,9 +115,13 @@ class PcBrain(
         tools: List<ToolSpec>,
         runTool: (String, Map<String, Any?>) -> ToolResult,
         ui: AssistantUi,
+        imageJpeg: ByteArray? = null,
     ): String {
         val clientTools = tools.map { it.toJson() }
-        history += mapOf("role" to "user", "content" to userText)
+        history += mapOf(
+            "role" to "user",
+            "content" to if (imageJpeg == null) userText else listOf(imageBlock(imageJpeg), mapOf("type" to "text", "text" to userText)),
+        )
         var spoken = StringBuilder()
         var body: Map<String, Any?> = mapOf("messages" to history.toList(), "clientTools" to clientTools, "client" to "android")
         repeat(MAX_HOPS) {
@@ -150,7 +155,7 @@ class PcBrain(
                         results += buildMap {
                             put("type", "tool_result")
                             put("tool_use_id", call["id"])
-                            put("content", r.text)
+                            put("content", if (r.imageJpeg == null) r.text else listOf(imageBlock(r.imageJpeg), mapOf("type" to "text", "text" to r.text)))
                             if (r.isError) put("is_error", true)
                         }
                     }
@@ -211,6 +216,74 @@ class PcBrain(
     } catch (_: Exception) {
         null
     }
+
+    private fun imageBlock(jpeg: ByteArray) = mapOf(
+        "type" to "image",
+        "source" to mapOf("type" to "base64", "media_type" to "image/jpeg", "data" to Base64.getEncoder().encodeToString(jpeg)),
+    )
+
+    // ── The phone app's other links to the PC ─────────────────────────────
+
+    data class Notice(val seq: Long, val title: String, val text: String)
+
+    /** Announcements made since `after` (a sequence number), and the newest number. */
+    @Suppress("UNCHECKED_CAST")
+    fun notices(after: Long): Pair<List<Notice>, Long> {
+        val m = getJson("/api/phone/notices?after=$after")
+        val items = (m["items"] as? List<Map<String, Any?>>).orEmpty().map {
+            Notice((it["seq"] as Number).toLong(), it["title"].toString(), it["text"].toString())
+        }
+        return items to ((m["latest"] as? Number)?.toLong() ?: after)
+    }
+
+    data class Upcoming(val text: String, val dueAt: String)
+    data class Summary(val upcoming: List<Upcoming>, val routines: List<String>)
+
+    /** For the home-screen widget. */
+    @Suppress("UNCHECKED_CAST")
+    fun summary(): Summary {
+        val m = getJson("/api/phone/summary")
+        return Summary(
+            (m["upcoming"] as? List<Map<String, Any?>>).orEmpty().map { Upcoming(it["text"].toString(), it["dueAt"].toString()) },
+            (m["routines"] as? List<Any?>).orEmpty().map { it.toString() },
+        )
+    }
+
+    /** Runs a routine that needs no confirmation (widget button, location trigger). */
+    fun runRoutine(name: String): String = postJson("/api/routines/run", mapOf("name" to name))["result"]?.toString().orEmpty()
+
+    fun pushHealth(days: List<Map<String, Any?>>) {
+        if (days.isNotEmpty()) postJson("/api/phone/health", mapOf("days" to days))
+    }
+
+    fun meetingStart(title: String): String = postJson("/api/meeting", mapOf("action" to "start", "title" to title))["id"].toString()
+
+    fun meetingChunk(id: String, wav: ByteArray, final: Boolean) {
+        val body = wav.toRequestBody("audio/wav".toMediaType())
+        send(slow, { Request.Builder().url("$baseUrl/api/meeting/chunk?id=$id${if (final) "&final=1" else ""}").post(body) }).use { res ->
+            if (!res.isSuccessful) throw PcUnavailable(errorOf(res) ?: "The PC answered ${res.code}.")
+        }
+    }
+
+    /** Ends the meeting; returns what ULTRON says about it. */
+    fun meetingStop(): String = postJson("/api/meeting", mapOf("action" to "stop"), slow)["spoken"]?.toString().orEmpty()
+
+    @Suppress("UNCHECKED_CAST")
+    private fun getJson(path: String): Map<String, Any?> =
+        send(quick, { Request.Builder().url("$baseUrl$path").get() }).use { res ->
+            if (!res.isSuccessful) throw PcUnavailable(errorOf(res) ?: "The PC answered ${res.code}.")
+            json.readValue(res.body!!.string(), Map::class.java) as Map<String, Any?>
+        }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun postJson(path: String, body: Any, client: OkHttpClient = quick): Map<String, Any?> =
+        send(client, { Request.Builder().url("$baseUrl$path").post(jsonBody(body)) }).use { res ->
+            if (!res.isSuccessful) {
+                val err = errorOf(res) ?: "The PC answered ${res.code}."
+                if (res.code in 400..499) throw SetupProblem(err) else throw PcUnavailable(err)
+            }
+            json.readValue(res.body!!.string(), Map::class.java) as Map<String, Any?>
+        }
 
     private fun jsonBody(value: Any) = json.writeValueAsString(value).toRequestBody("application/json".toMediaType())
 

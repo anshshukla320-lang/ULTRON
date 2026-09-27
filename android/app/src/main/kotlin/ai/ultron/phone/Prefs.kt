@@ -43,6 +43,30 @@ class Prefs(context: Context) : MemoryStore, CookieStore {
         get() = sp.getString("country_code", "91").orEmpty()
         set(v) = sp.edit().putString("country_code", v.filter(Char::isDigit)).apply()
 
+    /** Listen for "Hey ULTRON" while the app is open. */
+    var wakeWord: Boolean
+        get() = sp.getBoolean("wake_word", false)
+        set(v) = sp.edit().putBoolean("wake_word", v).apply()
+    /** Keep the screen on while charging (a bedside/desk ULTRON). */
+    var stayAwakeCharging: Boolean
+        get() = sp.getBoolean("stay_awake", true)
+        set(v) = sp.edit().putBoolean("stay_awake", v).apply()
+    /** Last PC announcement shown as a notification; -1 = never synced. */
+    var lastNoticeSeq: Long
+        get() = sp.getLong("last_notice", -1)
+        set(v) = sp.edit().putLong("last_notice", v).apply()
+    var lastHealthPush: Long
+        get() = sp.getLong("last_health_push", 0)
+        set(v) = sp.edit().putLong("last_health_push", v).apply()
+    /** What the home-screen widget shows (JSON from the PC). */
+    var widgetJson: String
+        get() = sp.getString("widget", "").orEmpty()
+        set(v) = sp.edit().putString("widget", v).apply()
+    /** Saved places and location triggers (JSON). */
+    var placesJson: String
+        get() = sp.getString("places", "").orEmpty()
+        set(v) = sp.edit().putString("places", v).apply()
+
     fun config() = AssistantConfig(pcUrl, pcPassword, apiKey)
 
     // ── MemoryStore ──────────────────────────────────────────────────────

@@ -82,5 +82,19 @@ object VoiceCommands {
     private val LEADING_WAKE = Regex("""^\s*(?:(?:hey|ok)[,]?\s*)?(?:ultron|altron)\b[,.!]?\s*""", RegexOption.IGNORE_CASE)
 
     fun isStop(text: String) = STOP.matches(text.trim())
+
+    private val WAKE = listOf(
+        Regex("""\b(hey|ok|hi)[,]?\s+(ultron|altron|ultra ?on|all ?tron)\b""", RegexOption.IGNORE_CASE),
+        Regex("""^\s*(ultron|altron)\b""", RegexOption.IGNORE_CASE),
+    )
+
+    /** What follows "Hey ULTRON" ("" if said alone), or null if there's no wake word. */
+    fun afterWake(text: String): String? {
+        for (re in WAKE) {
+            val m = re.find(text) ?: continue
+            return text.substring(m.range.last + 1).trimStart(',', '.', '!', '?', ' ').trim()
+        }
+        return null
+    }
     fun stripWake(text: String) = text.replace(LEADING_WAKE, "").trim()
 }

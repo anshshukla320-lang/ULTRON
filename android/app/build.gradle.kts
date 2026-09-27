@@ -69,4 +69,10 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    // FileProvider, for handing the camera app a file to write the photo to.
+    implementation("androidx.core:core:1.13.1")
+    // Health Connect (steps, sleep, heart rate) and what it's built on.
+    implementation("androidx.health.connect:connect-client:1.1.0")
+    implementation("androidx.activity:activity:1.9.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

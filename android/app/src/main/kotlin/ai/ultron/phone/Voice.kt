@@ -3,6 +3,7 @@ package ai.ultron.phone
 import ai.ultron.core.SpeechText
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -24,14 +25,19 @@ class Ears(private val context: Context, private val events: Events) {
     }
 
     private var recognizer: SpeechRecognizer? = null
+    /** The on-device recogniser can't do this language: use the normal one. */
+    private var onDeviceFailed = false
     var active = false
         private set
 
     val available get() = SpeechRecognizer.isRecognitionAvailable(context)
 
-    fun listen() {
+    /** `quiet`: waiting for the wake word — the on-device recogniser when the
+     *  phone has one (no network, and no start beep on most phones). */
+    fun listen(quiet: Boolean = false) {
         stop()
-        val r = SpeechRecognizer.createSpeechRecognizer(context)
+        val onDevice = quiet && !onDeviceFailed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+        val r = if (onDevice) SpeechRecognizer.createOnDeviceSpeechRecognizer(context) else SpeechRecognizer.createSpeechRecognizer(context)
         recognizer = r
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) = events.onListening()
@@ -50,6 +56,8 @@ class Ears(private val context: Context, private val events: Events) {
             }
             override fun onError(error: Int) {
                 active = false
+                // 11-13: server disconnected / language not supported / unavailable.
+                if (onDevice && error in 11..13) onDeviceFailed = true
                 events.onNothing(
                     when (error) {
                         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> null
@@ -64,6 +72,7 @@ class Ears(private val context: Context, private val events: Events) {
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+        if (quiet) intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         active = true
         r.startListening(intent)
     }
