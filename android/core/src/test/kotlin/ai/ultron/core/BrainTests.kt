@@ -326,3 +326,42 @@ class PhotoTest {
         assertEquals(null, VoiceCommands.afterWake("the movie ultron was fun"))
     }
 }
+
+@Suppress("UNCHECKED_CAST")
+class CompanionLinkTest {
+    private val server = MockWebServer().apply { start() }
+
+    @AfterTest fun stop() = server.shutdown()
+
+    @Test fun `location, away and a security photo go over the signed-in session`() {
+        val bodies = ConcurrentLinkedQueue<Pair<String, String>>()
+        val jpeg = byteArrayOf(-1, -40, -1, 1, 2, 3)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path.orEmpty()
+                if (path == "/api/auth/login") return MockResponse().setResponseCode(303).addHeader("Set-Cookie", "ultron_session=tok; Path=/")
+                if (request.getHeader("Cookie") != "ultron_session=tok") return MockResponse().setResponseCode(401)
+                bodies += path to request.body.readUtf8()
+                return when {
+                    path == "/api/phone/location" -> MockResponse().setBody("""{"ok":true}""")
+                    path == "/api/phone/away" -> MockResponse().setBody("""{"result":"Security mode is on."}""")
+                    path.startsWith("/api/security/photo?id=") -> MockResponse().setBody(okio.Buffer().write(jpeg))
+                    path.startsWith("/api/phone/notices") -> MockResponse().setBody("""{"items":[{"seq":4,"title":"Security alert","text":"Someone is at your PC","image":"1-abcdef"},{"seq":5,"title":"ULTRON","text":"Rain soon"}],"latest":5}""")
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+        }
+        val pc = PcBrain(server.url("/").toString(), "secret", InMemoryCookies())
+        pc.pushLocation(18.52, 73.85, 12f, 1000L)
+        assertEquals("Security mode is on.", pc.setAway(true))
+        val (items, latest) = pc.notices(3)
+        assertEquals(5L, latest)
+        assertEquals("1-abcdef", items[0].image)
+        assertEquals(null, items[1].image)
+        assertTrue(pc.securityPhoto(items[0].image!!).contentEquals(jpeg))
+        val loc = JSON.readValue(bodies.first { it.first == "/api/phone/location" }.second, Map::class.java)
+        assertEquals(18.52, loc["lat"])
+        assertEquals(1000, loc["at"])
+        assertEquals(true, JSON.readValue(bodies.first { it.first == "/api/phone/away" }.second, Map::class.java)["away"])
+    }
+}

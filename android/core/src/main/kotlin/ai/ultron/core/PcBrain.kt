@@ -224,14 +224,15 @@ class PcBrain(
 
     // ── The phone app's other links to the PC ─────────────────────────────
 
-    data class Notice(val seq: Long, val title: String, val text: String)
+    /** `image`: a photo id (security mode) — fetch it with [securityPhoto]. */
+    data class Notice(val seq: Long, val title: String, val text: String, val image: String? = null)
 
     /** Announcements made since `after` (a sequence number), and the newest number. */
     @Suppress("UNCHECKED_CAST")
     fun notices(after: Long): Pair<List<Notice>, Long> {
         val m = getJson("/api/phone/notices?after=$after")
         val items = (m["items"] as? List<Map<String, Any?>>).orEmpty().map {
-            Notice((it["seq"] as Number).toLong(), it["title"].toString(), it["text"].toString())
+            Notice((it["seq"] as Number).toLong(), it["title"].toString(), it["text"].toString(), it["image"]?.toString())
         }
         return items to ((m["latest"] as? Number)?.toLong() ?: after)
     }
@@ -255,6 +256,21 @@ class PcBrain(
     fun pushHealth(days: List<Map<String, Any?>>) {
         if (days.isNotEmpty()) postJson("/api/phone/health", mapOf("days" to days))
     }
+
+    /** The phone's last known location, for "time to leave" alerts on the PC. */
+    fun pushLocation(lat: Double, lon: Double, accuracy: Float, at: Long) {
+        postJson("/api/phone/location", mapOf("lat" to lat, "lon" to lon, "accuracy" to accuracy, "at" to at))
+    }
+
+    /** Left home (true) / back home (false): security mode follows, if the user wants. */
+    fun setAway(away: Boolean): String = postJson("/api/phone/away", mapOf("away" to away))["result"]?.toString().orEmpty()
+
+    /** A security-mode snapshot, as JPEG bytes. */
+    fun securityPhoto(id: String): ByteArray =
+        send(quick, { Request.Builder().url("$baseUrl/api/security/photo?id=${java.net.URLEncoder.encode(id, "UTF-8")}").get() }).use { res ->
+            if (!res.isSuccessful) throw PcUnavailable("The PC answered ${res.code}.")
+            res.body!!.bytes()
+        }
 
     fun meetingStart(title: String): String = postJson("/api/meeting", mapOf("action" to "start", "title" to title))["id"].toString()
 

@@ -2,6 +2,9 @@ package ai.ultron.phone
 
 import ai.ultron.core.PcBrain
 import android.Manifest
+import android.annotation.SuppressLint
+import android.graphics.BitmapFactory
+import android.location.LocationManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -42,7 +45,7 @@ object Notices {
     fun canPost(ctx: Context) =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || ctx.hasPermissions(Manifest.permission.POST_NOTIFICATIONS)
 
-    fun show(ctx: Context, id: Int, title: String, text: String, channel: String = CHANNEL) {
+    fun show(ctx: Context, id: Int, title: String, text: String, channel: String = CHANNEL, picture: android.graphics.Bitmap? = null) {
         if (!canPost(ctx)) return
         ensureChannels(ctx)
         val open = PendingIntent.getActivity(
@@ -55,7 +58,8 @@ object Notices {
             .setColor(ctx.getColor(R.color.amber))
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setStyle(if (picture != null) Notification.BigPictureStyle().bigPicture(picture).setSummaryText(text) else Notification.BigTextStyle().bigText(text))
+            .apply { if (picture != null) setLargeIcon(picture) }
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
@@ -85,7 +89,13 @@ object Sync {
             // First sync: start from now rather than replaying the whole log.
             if (after >= 0) {
                 fresh = items
-                if (!inApp) items.takeLast(5).forEach { Notices.show(ctx, (it.seq % 100_000).toInt(), it.title, it.text) }
+                for (n in items.takeLast(5)) {
+                    // A security photo always gets a notification, even with the app open.
+                    val picture = n.image?.let { id ->
+                        runCatching { pc.securityPhoto(id).let { BitmapFactory.decodeByteArray(it, 0, it.size) } }.getOrNull()
+                    }
+                    if (!inApp || n.image != null) Notices.show(ctx, (n.seq % 100_000).toInt(), n.title, n.text, picture = picture)
+                }
             }
             prefs.lastNoticeSeq = latest
         } catch (e: Exception) {
@@ -103,6 +113,7 @@ object Sync {
         } catch (e: Exception) {
             Log.i(TAG, "summary: ${e.message}")
         }
+        pushLocation(ctx, pc)
         if (System.currentTimeMillis() - prefs.lastHealthPush > 3 * 3_600_000L && Health.granted(ctx)) {
             try {
                 pc.pushHealth(Health.days(ctx, 3))
@@ -112,6 +123,24 @@ object Sync {
             }
         }
         fresh
+    }
+}
+
+/** The phone's last known location (no new fix, no battery cost), for the PC's "time to leave" alerts. */
+@SuppressLint("MissingPermission") // checked just below
+private fun pushLocation(ctx: Context, pc: PcBrain) {
+    if (!ctx.hasPermissions(Manifest.permission.ACCESS_COARSE_LOCATION)) return
+    val sp = ctx.getSharedPreferences("ultron_sync", Context.MODE_PRIVATE)
+    val lm = ctx.getSystemService(LocationManager::class.java)
+    val loc = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+        .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+        .maxByOrNull { it.time } ?: return
+    if (loc.time <= sp.getLong("location_at", 0)) return
+    try {
+        pc.pushLocation(loc.latitude, loc.longitude, loc.accuracy, loc.time)
+        sp.edit().putLong("location_at", loc.time).apply()
+    } catch (e: Exception) {
+        Log.i("UltronSync", "location: ${e.message}")
     }
 }
 

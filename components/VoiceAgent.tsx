@@ -7,6 +7,7 @@ import { SentenceChunker } from "@/lib/sentenceChunker";
 import { SpeechPlayer } from "@/lib/speechPlayer";
 import { WhisperRecognizer } from "@/lib/whisperRecognizer";
 import { PresenceWatcher } from "@/lib/presenceWatcher";
+import { SecurityWatcher } from "@/lib/securityWatcher";
 import { MeetingRecorder } from "@/lib/meetingRecorder";
 import { detectWake, isRepeatOf, isStopCommand, leadingWakeCommand, looksLikeEcho, stripLeadingWake } from "@/lib/voiceCommands";
 
@@ -432,6 +433,39 @@ export default function VoiceAgent() {
     });
     return () => events.close();
   }, [listenNow, pushLog]);
+
+  // Security mode: while it's on, this page (on the PC itself) watches the
+  // webcam and sends a snapshot when someone appears.
+  useEffect(() => {
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) return;
+    let watcher: SecurityWatcher | null = null;
+    const apply = (on: boolean) => {
+      if (on && !watcher) {
+        watcher = new SecurityWatcher((jpeg) => void fetch("/api/security/alert", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: jpeg }).catch(() => {}));
+        watcher.start().then(
+          () => pushLog("action", "🛡 Security mode: watching the webcam."),
+          (err) => {
+            watcher = null;
+            pushLog("error", `Security mode couldn't use the webcam: ${err instanceof Error ? err.message : String(err)}`);
+          },
+        );
+      } else if (!on && watcher) {
+        watcher.stop();
+        watcher = null;
+        pushLog("action", "🛡 Security mode off.");
+      }
+    };
+    void fetch("/api/security")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { on?: boolean } | null) => d?.on && apply(true))
+      .catch(() => {});
+    const events = new EventSource("/api/events");
+    events.addEventListener("security", (e) => apply((JSON.parse((e as MessageEvent).data) as { on: boolean }).on));
+    return () => {
+      events.close();
+      watcher?.stop();
+    };
+  }, [pushLog]);
 
   // Opened by the hotkey when no page was open: listen once the mic is up.
   useEffect(() => {

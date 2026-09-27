@@ -13,6 +13,7 @@ interface GmailPart {
 
 interface GmailMessage {
   id: string;
+  threadId?: string;
   snippet?: string;
   payload?: GmailPart & { headers?: GmailHeader[] };
 }
@@ -138,4 +139,60 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
     body: JSON.stringify({ raw }),
   });
   return `Email sent to ${to}.`;
+}
+
+export interface FullEmail {
+  id: string;
+  threadId: string;
+  from: string;
+  fromName: string;
+  /** Where a reply goes (Reply-To, else From). */
+  replyTo: string;
+  subject: string;
+  date: string;
+  messageIdHeader: string;
+  body: string;
+}
+
+/** One email with what's needed to reply to it in the same thread. */
+export async function getEmail(id: string): Promise<FullEmail> {
+  const msg = await gmailFetch<GmailMessage>(`/messages/${id}?format=full`);
+  const h = msg.payload?.headers;
+  const from = extractHeader(h, "From");
+  return {
+    id,
+    threadId: msg.threadId ?? "",
+    from,
+    fromName: shortSender(from),
+    replyTo: extractHeader(h, "Reply-To") || from,
+    subject: extractHeader(h, "Subject") || "(no subject)",
+    date: extractHeader(h, "Date"),
+    messageIdHeader: extractHeader(h, "Message-ID") || extractHeader(h, "Message-Id"),
+    body: (extractPlainText(msg.payload) || msg.snippet || "").slice(0, 6000),
+  };
+}
+
+/** Header values can't carry line breaks (they'd start new headers). */
+function oneLine(v: string): string {
+  return v.replace(/[\r\n]+/g, " ").trim();
+}
+
+/** Builds the raw RFC 2822 reply (exported for tests). */
+export function buildReply(original: Pick<FullEmail, "replyTo" | "subject" | "messageIdHeader">, body: string): string {
+  const subject = /^re:/i.test(original.subject) ? original.subject : `Re: ${original.subject}`;
+  const lines = [`To: ${oneLine(original.replyTo)}`, `Subject: ${oneLine(subject)}`];
+  if (original.messageIdHeader) {
+    lines.push(`In-Reply-To: ${oneLine(original.messageIdHeader)}`, `References: ${oneLine(original.messageIdHeader)}`);
+  }
+  lines.push('Content-Type: text/plain; charset="UTF-8"', "", body);
+  return lines.join("\r\n");
+}
+
+/** Replies in the same Gmail thread. */
+export async function replyToEmail(original: FullEmail, body: string): Promise<void> {
+  await gmailFetch(`/messages/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: encodeBase64Url(buildReply(original, body)), threadId: original.threadId || undefined }),
+  });
 }

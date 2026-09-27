@@ -106,7 +106,8 @@ class Places(private val ctx: Context) {
         val lm = ctx.getSystemService(LocationManager::class.java)
         for (p in all()) {
             unregister(p)
-            if (p.triggers.isEmpty()) continue
+            // "home" is always watched: the PC's security mode follows it.
+            if (p.triggers.isEmpty() && !isHome(p.name)) continue
             val pi = intentFor(p, PendingIntent.FLAG_UPDATE_CURRENT) ?: continue
             runCatching { lm.addProximityAlert(p.lat, p.lon, p.radius, -1, pi) }
         }
@@ -114,6 +115,8 @@ class Places(private val ctx: Context) {
     }
 
     companion object {
+        fun isHome(name: String) = name.trim().equals("home", ignoreCase = true)
+
         /** Where the phone is now (permissions already granted). Background thread. */
         @SuppressLint("MissingPermission")
         fun here(ctx: Context): Location {
@@ -156,7 +159,8 @@ class PlaceReceiver : BroadcastReceiver() {
         val entering = intent.getBooleanExtra(LocationManager.KEY_PROXIMITY_ENTERING, true)
         val on = if (entering) "arrive" else "leave"
         val place = Places(context).find(name) ?: return
-        val trigger = place.triggers.firstOrNull { it.on == on } ?: return
+        val trigger = place.triggers.firstOrNull { it.on == on }
+        if (trigger == null && !Places.isHome(place.name)) return
         // GPS jitter at the edge of the circle: once per 10 minutes is plenty.
         val sp = context.getSharedPreferences("ultron_places_fired", Context.MODE_PRIVATE)
         val key = "${place.name}|$on"
@@ -167,10 +171,16 @@ class PlaceReceiver : BroadcastReceiver() {
         val pending = goAsync()
         Thread {
             try {
-                trigger.reminder?.let {
+                if (Places.isHome(place.name)) {
+                    // Tell the PC: it switches security mode on/off (if the user wants that).
+                    val prefs = Prefs(context)
+                    val c = prefs.config()
+                    if (c.hasPc) runCatching { PcBrain(c.pcUrl, c.pcPassword, prefs).setAway(!entering) }
+                }
+                trigger?.reminder?.let {
                     Notices.show(context, key.hashCode(), if (entering) "At ${place.name}" else "Leaving ${place.name}", it, Notices.CHANNEL_PLACES)
                 }
-                trigger.routine?.let { routine ->
+                trigger?.routine?.let { routine ->
                     val prefs = Prefs(context)
                     val c = prefs.config()
                     val msg = try {

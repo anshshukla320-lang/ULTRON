@@ -43,6 +43,15 @@ import { activeMeeting, startMeeting, stopMeeting, waitForFinalChunk } from "./m
 import { findWhisper } from "./whisperStt";
 import { emitPageEvent } from "./events";
 import { operateComputer } from "./computerUse";
+import { inboxDigest, sendInboxReply } from "./inbox";
+import { scanExpensesNow } from "./expenseEmails";
+import { trackPackages } from "./packages";
+import { travelTime } from "./travel";
+import { watchPrice, listPriceWatches, stopPriceWatch } from "./priceWatch";
+import { addHabit, markHabitDone, habitStatus, removeHabit } from "./habits";
+import { upcomingBirthdays, addBirthday } from "./birthdays";
+import { setSecurityMode } from "./security";
+import { electricityUsage } from "./energy";
 import { getSettings } from "./settings";
 import { getWeather } from "./weather";
 import { lookAtScreen } from "./screen";
@@ -150,6 +159,22 @@ export type ToolName =
   | "health_summary"
   | "start_meeting_notes"
   | "stop_meeting_notes"
+  | "inbox_digest"
+  | "send_email_reply"
+  | "scan_expenses"
+  | "track_packages"
+  | "travel_time"
+  | "watch_price"
+  | "list_price_watches"
+  | "stop_price_watch"
+  | "habit_add"
+  | "habit_done"
+  | "habit_status"
+  | "habit_remove"
+  | "upcoming_birthdays"
+  | "add_birthday"
+  | "security_mode"
+  | "electricity_usage"
   | "operate_computer";
 
 /** Tools in here run immediately. Anything not listed requires the user to
@@ -246,6 +271,22 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "health_summary",
   "start_meeting_notes",
   "stop_meeting_notes",
+  "inbox_digest",
+  "scan_expenses",
+  "track_packages",
+  "travel_time",
+  "watch_price",
+  "list_price_watches",
+  "stop_price_watch",
+  "habit_add",
+  "habit_done",
+  "habit_status",
+  "habit_remove",
+  "upcoming_birthdays",
+  "add_birthday",
+  "security_mode",
+  "electricity_usage",
+  // send_email_reply shows the exact reply for approval.
   // send_whatsapp and smart_home_security need confirmation too.
   // power_action and clean_disk_junk deliberately need confirmation.
 ]);
@@ -654,7 +695,7 @@ export const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "log_expense",
-    description: "Log a personal expense to a local ledger for later summary. No bank connection — this is manual tracking only.",
+    description: "Log a personal expense to the local ledger. (Card and UPI payments that the bank emails about are logged automatically — don't log those again.)",
     input_schema: {
       type: "object",
       properties: {
@@ -667,10 +708,13 @@ export const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "expense_summary",
-    description: "Summarize logged expenses by category over a recent period.",
+    description: "What the user spent, by category: logged by hand plus card/UPI payments read from bank emails. For 'how much did I spend on food this month?'.",
     input_schema: {
       type: "object",
-      properties: { days: { type: "number", description: "Number of recent days to summarize, default 30" } },
+      properties: {
+        period: { type: "string", description: "today, this_month, last_month, or a number of days (default 30)" },
+        category: { type: "string", description: "Only this category or merchant, e.g. food, groceries, Swiggy" },
+      },
       required: [],
     },
   },
@@ -1181,6 +1225,105 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "inbox_digest",
+    description: "Go through the user's unread email (not promotions/notifications): which emails matter, and ready-to-send draft replies for those that need an answer. It also runs by itself each morning. Read the drafts out when asked; offer to send or change them.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "send_email_reply",
+    description: "Reply (in the same thread) to one of the emails from inbox_digest. `body` must be the complete final text — the draft, with any changes the user asked for — because the user approves exactly this text.",
+    input_schema: {
+      type: "object",
+      properties: {
+        to_who: { type: "string", description: "The sender's name, the subject, or its number in the digest" },
+        body: { type: "string", description: "The full reply as it will be sent" },
+      },
+      required: ["to_who", "body"],
+    },
+  },
+  {
+    name: "scan_expenses",
+    description: "Read new bank / card / UPI alert emails now and log the payments into the expense ledger (this also happens by itself every few hours).",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "track_packages",
+    description: "Orders and deliveries from shopping and courier emails (Amazon, Flipkart…): what's coming, its status and expected day.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "travel_time",
+    description: "How long it takes to get somewhere now (live traffic when Google Maps is set up), from where the user's phone is or from home. ULTRON also says 'time to leave' by itself for calendar events that have a place.",
+    input_schema: {
+      type: "object",
+      properties: { destination: { type: "string" }, from: { type: "string", description: "Only if the user says where from" } },
+      required: ["destination"],
+    },
+  },
+  {
+    name: "watch_price",
+    description: "Watch a product's price and tell the user when it drops to the target. Needs the product page link — if they haven't given one, ask them to copy it (then read_clipboard).",
+    input_schema: {
+      type: "object",
+      properties: { url: { type: "string" }, target_price: { type: "number", description: "Tell them at or below this price" } },
+      required: ["url", "target_price"],
+    },
+  },
+  {
+    name: "list_price_watches",
+    description: "The prices being watched, with the current and lowest price seen.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "stop_price_watch",
+    description: "Stop watching a price.",
+    input_schema: { type: "object", properties: { which: { type: "string", description: "Product name or watch id" } }, required: ["which"] },
+  },
+  {
+    name: "habit_add",
+    description: "Start tracking a daily habit or goal. `goal` is the daily action phrased to follow 'did you …', e.g. 'read for 20 minutes'.",
+    input_schema: { type: "object", properties: { name: { type: "string", description: "Short name, e.g. reading" }, goal: { type: "string" } }, required: ["name"] },
+  },
+  {
+    name: "habit_done",
+    description: "Tick off a habit for today (or yesterday) — when the user says they did it, including in answer to the evening check-in.",
+    input_schema: { type: "object", properties: { name: { type: "string" }, day: { type: "string", description: "today (default), yesterday, or YYYY-MM-DD" } }, required: ["name"] },
+  },
+  {
+    name: "habit_status",
+    description: "The user's habits: done today or not, streaks, this week.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "habit_remove",
+    description: "Stop tracking a habit.",
+    input_schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+  },
+  {
+    name: "upcoming_birthdays",
+    description: "Birthdays coming up (from Google Contacts and ones the user told you).",
+    input_schema: { type: "object", properties: { days: { type: "number", description: "How far ahead, default 30" } }, required: [] },
+  },
+  {
+    name: "add_birthday",
+    description: "Remember someone's birthday (for people not in Google Contacts, or to correct one).",
+    input_schema: { type: "object", properties: { name: { type: "string" }, date: { type: "string", description: "e.g. '12 March' or '12 March 1995'" } }, required: ["name", "date"] },
+  },
+  {
+    name: "security_mode",
+    description: "Home security mode on/off: while on, the PC's webcam watches and the user's phone gets a photo if someone appears. It also switches on by itself when the phone leaves home (if enabled in Settings).",
+    input_schema: { type: "object", properties: { on: { type: "boolean" } }, required: ["on"] },
+  },
+  {
+    name: "electricity_usage",
+    description: "Electricity used by the Smart Life plugs that measure power: per device, with approximate cost, plus what's drawing power right now.",
+    input_schema: {
+      type: "object",
+      properties: { period: { type: "string", description: "today, yesterday, week (default), month" }, device: { type: "string", description: "Only this device, e.g. AC" } },
+      required: [],
+    },
+  },
+  {
     name: "operate_computer",
     description:
       "Carry out a multi-step task on the user's PC by looking at the screen and using the mouse and keyboard — e.g. filling in a form, renaming files in Explorer, changing a setting in an app, finding something on a website. Needs the user's confirmation. Describe the task completely and concretely (which app/site, what to do, when to stop). It will not enter passwords or payment details, buy things, send messages, or delete files. Prefer a dedicated tool when one exists — this is slower.",
@@ -1234,6 +1377,11 @@ export const OWNER_ONLY: ReadonlySet<string> = new Set([
   "check_bills",
   "read_email",
   "list_emails",
+  "inbox_digest",
+  "send_email_reply",
+  "scan_expenses",
+  "track_packages",
+  "security_mode",
 ]);
 
 /** What routines may contain and which of their steps run without asking. */
@@ -1362,7 +1510,7 @@ export async function executeTool(
     case "log_expense":
       return logExpense(Number(input.amount ?? 0), String(input.category ?? ""), input.note ? String(input.note) : undefined);
     case "expense_summary":
-      return expenseSummary(input.days ? Number(input.days) : 30);
+      return expenseSummary(input.period !== undefined ? String(input.period) : input.days ? Number(input.days) : 30, input.category ? String(input.category) : undefined);
     case "log_workout":
       return logWorkout(
         String(input.description ?? ""),
@@ -1558,6 +1706,38 @@ export async function executeTool(
       const { spoken, file } = await stopMeeting();
       return file ? `${spoken}\n(Notes saved to ${file}.)` : spoken;
     }
+    case "inbox_digest":
+      return inboxDigest();
+    case "send_email_reply":
+      return sendInboxReply(String(input.to_who ?? ""), String(input.body ?? ""));
+    case "scan_expenses":
+      return scanExpensesNow();
+    case "track_packages":
+      return trackPackages();
+    case "travel_time":
+      return travelTime(String(input.destination ?? ""), input.from ? String(input.from) : undefined);
+    case "watch_price":
+      return watchPrice(String(input.url ?? ""), Number(input.target_price));
+    case "list_price_watches":
+      return listPriceWatches();
+    case "stop_price_watch":
+      return stopPriceWatch(String(input.which ?? ""));
+    case "habit_add":
+      return addHabit(String(input.name ?? ""), input.goal ? String(input.goal) : "");
+    case "habit_done":
+      return markHabitDone(String(input.name ?? ""), input.day ? String(input.day) : "today");
+    case "habit_status":
+      return habitStatus();
+    case "habit_remove":
+      return removeHabit(String(input.name ?? ""));
+    case "upcoming_birthdays":
+      return upcomingBirthdays(input.days !== undefined ? Number(input.days) : 30);
+    case "add_birthday":
+      return addBirthday(String(input.name ?? ""), String(input.date ?? ""));
+    case "security_mode":
+      return setSecurityMode(input.on === true || input.on === "true");
+    case "electricity_usage":
+      return electricityUsage(input.period ? String(input.period) : "week", input.device ? String(input.device) : "");
     case "operate_computer": {
       if (!(await getSettings()).computerUse) throw new Error("Operating the computer is switched off in Settings.");
       return operateComputer(String(input.task ?? ""), {

@@ -25,6 +25,14 @@ interface Settings {
   newsInBriefing: boolean;
   billReminders: boolean;
   journalTime: string;
+  inboxDigest: boolean;
+  autoExpenses: boolean;
+  packageTracking: boolean;
+  leaveAlerts: boolean;
+  habitCheckinTime: string;
+  birthdayReminders: boolean;
+  securityWhenAway: boolean;
+  energyWarnings: boolean;
 }
 
 interface Snapshot {
@@ -105,6 +113,8 @@ export default function SettingsPage() {
   const [recording, setRecording] = useState<string | null>(null);
   const [newMember, setNewMember] = useState("");
   const [journalTime, setJournalTime] = useState("");
+  const [habitTime, setHabitTime] = useState("");
+  const [securityOn, setSecurityOn] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/settings");
@@ -116,6 +126,11 @@ export default function SettingsPage() {
     setHotkey(d.settings.hotkey);
     setStocks(d.settings.stockWatchlist.join(", "));
     setJournalTime(d.settings.journalTime);
+    setHabitTime(d.settings.habitCheckinTime);
+    void fetch("/api/security")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((x: { on?: boolean } | null) => setSecurityOn(!!x?.on))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -349,9 +364,36 @@ export default function SettingsPage() {
       </section>
 
       <section>
+        <h2>Home security</h2>
+        <Toggle
+          label="Security mode"
+          hint="The webcam watches while you're out; your phone gets a photo if someone appears. Leave the ULTRON page open on this PC."
+          checked={!!securityOn}
+          onChange={(v) => {
+            setSecurityOn(v);
+            void fetch("/api/security", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: v }) });
+          }}
+        />
+        <Toggle label="Switch it on when I leave home" hint="Uses the phone app: save your home there (&quot;this is home&quot;) with location allowed all the time." checked={s.securityWhenAway} onChange={(v) => update({ securityWhenAway: v })} />
+        <Toggle label="Warn me about things left on" hint="Smart Life plugs that measure power: anything on while you're out, or running for 8+ hours." checked={s.energyWarnings} onChange={(v) => update({ energyWarnings: v })} />
+      </section>
+
+      <section>
         <h2>Everyday help</h2>
         <Toggle label="Record screen time" hint="Which apps you use, kept on this PC (app names only)." checked={s.screenTime} onChange={(v) => update({ screenTime: v })} />
         <Toggle label="Remind me about bills" hint="Checks Gmail once a day and reminds you 2 days before each due date." checked={s.billReminders} onChange={(v) => update({ billReminders: v })} />
+        <Toggle label="Morning inbox check" hint="Each morning ULTRON reads your unread email, tells you what matters and drafts replies. Nothing is sent without your OK." checked={s.inboxDigest} onChange={(v) => update({ inboxDigest: v })} />
+        <Toggle label="Track spending from bank emails" hint="Card and UPI payment alerts in Gmail go into your expenses automatically." checked={s.autoExpenses} onChange={(v) => update({ autoExpenses: v })} />
+        <Toggle label="Track parcels" hint="Orders and deliveries from shopping emails; tells you when something is out for delivery." checked={s.packageTracking} onChange={(v) => update({ packageTracking: v })} />
+        <Toggle label="Tell me when to leave" hint="For calendar events with a place. Live traffic needs GOOGLE_MAPS_API_KEY in .env.local; set ULTRON_HOME_ADDRESS too." checked={s.leaveAlerts} onChange={(v) => update({ leaveAlerts: v })} />
+        <Toggle label="Birthday reminders" hint="From Google Contacts and birthdays you tell ULTRON about." checked={s.birthdayReminders} onChange={(v) => update({ birthdayReminders: v })} />
+        <label className="set-row">
+          <span>
+            Habit check-in
+            <small>24-hour time ULTRON asks about habits you haven&apos;t done yet (and reviews your week on Sundays). Empty = off.</small>
+          </span>
+          <input value={habitTime} placeholder="20:30" onChange={(e) => setHabitTime(e.target.value)} onBlur={() => update({ habitCheckinTime: habitTime.trim() })} />
+        </label>
         <Toggle label="Headlines in the morning briefing" checked={s.newsInBriefing} onChange={(v) => update({ newsInBriefing: v })} />
         <label className="set-row">
           <span>

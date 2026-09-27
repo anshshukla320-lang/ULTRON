@@ -88,3 +88,19 @@ export async function createEvent(summary: string, startISO: string, endISO: str
   });
   return `Created event "${summary}" (${formatEvent(event)}).`;
 }
+
+/** Timed events starting in the next `minutes` that have a place, for "leave now" alerts. */
+export async function eventsWithLocation(minutes: number): Promise<{ id: string; summary: string; start: Date; location: string }[]> {
+  const now = new Date();
+  const params = new URLSearchParams({
+    maxResults: "10",
+    singleEvents: "true",
+    orderBy: "startTime",
+    timeMin: now.toISOString(),
+    timeMax: new Date(now.getTime() + minutes * 60_000).toISOString(),
+  });
+  const data = await calendarFetch<{ items?: CalendarEvent[] }>(`/calendars/primary/events?${params.toString()}`);
+  return (data.items ?? [])
+    .filter((e) => e.start?.dateTime && e.location?.trim())
+    .map((e) => ({ id: e.id, summary: e.summary ?? "your event", start: new Date(e.start!.dateTime!), location: e.location!.trim() }));
+}

@@ -148,6 +148,31 @@ A few things to try:
 - **Family mode.** Settings > Family: record each person's voice. ULTRON
   knows who's speaking, and only you can send email or WhatsApp, run code,
   change settings, read your mail or control the computer.
+- **Inbox helper.** Each morning ULTRON reads your unread email, tells you
+  which messages matter and drafts replies. "Send the reply to Rahul" (or
+  "change it to say Saturday") — you approve the exact text before it goes.
+- **Spending, automatically.** Card and UPI payment alerts from your bank's
+  emails are logged for you: "how much did I spend on food this month?"
+  Amounts use ₹ (`ULTRON_CURRENCY` to change).
+- **Parcels.** Orders and deliveries from shopping emails: "out for delivery",
+  "delivered", and "arriving today" in the morning.
+- **Time to leave.** For calendar events with a place, ULTRON tells you when to
+  set off, from where your phone is (or home). Put `ULTRON_HOME_ADDRESS` in
+  `.env.local`; add `GOOGLE_MAPS_API_KEY` (Distance Matrix API) for live traffic,
+  otherwise it uses OpenStreetMap routing with a traffic allowance.
+- **Price watch.** "Tell me when this drops below 20,000" with a product
+  link — checked every 6 hours.
+- **Habits.** "I want to read 20 minutes a day": streaks, an evening check-in
+  (Settings > Habit check-in, default 20:30) and a weekly review on Sundays.
+- **Birthdays.** From Google Contacts plus any you tell ULTRON; it offers to
+  send a WhatsApp wish on the day.
+- **Home security mode.** "Security mode on" — or automatically when your
+  phone leaves home (save home in the phone app: "this is home"). The ULTRON
+  page on this PC watches the webcam and your phone gets a notification with
+  a photo if someone appears. Leave the page open on the PC.
+- **Electricity.** Smart Life plugs that measure power: "how much did the AC
+  use this week?", plus a warning if something's left on while you're out or
+  running for 8+ hours. Cost uses `ULTRON_POWER_RATE` (₹/kWh, default 8).
 - **Phone app.** A real Android app with ULTRON's mind — see below.
 
 Anything risky (sending email, running code, installing apps, shutting

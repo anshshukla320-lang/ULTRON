@@ -7,6 +7,8 @@ import { noticesOn } from "./noticeLog";
 import { screenTimeReport } from "./screenTime";
 import { readHealth, describeDay } from "./health";
 import { recordUsage } from "./usage";
+import { habitsDoneOn } from "./habits";
+import { readLedger, money } from "./financeTools";
 
 // A private journal, one Markdown file per day in ~/.ultron/journal:
 // things the user asks to note ("note in my journal: …"), plus an evening
@@ -143,6 +145,10 @@ export async function gatherDay(day: Date): Promise<string> {
   if (!screen.startsWith("No screen time")) sections.push(screen);
   const health = (await readHealth()).find((h) => h.date === key);
   if (health) sections.push(`Health: ${describeDay(health)}`);
+  const habits = await habitsDoneOn(key);
+  if (habits.length) sections.push(`Habits done: ${habits.join(", ")}`);
+  const spent = (await readLedger()).filter((e) => dayKey(new Date(e.loggedAt)) === key);
+  if (spent.length) sections.push(`Spending: ${spent.map((e) => `${money(e.amount)} ${e.note ?? e.category}`).join(", ")}`);
   const notes = parseDay(await read(key)).notes;
   if (notes.length) sections.push(`The user's own journal notes:\n${notes.map((n) => `- ${n}`).join("\n")}`);
   try {

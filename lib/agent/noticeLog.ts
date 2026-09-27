@@ -14,6 +14,8 @@ export interface LoggedNotice {
   kind: DueItem["kind"];
   title: string;
   text: string;
+  /** A photo to show with it (security mode): fetched from /api/security/photo?id=… */
+  image?: string;
 }
 
 const KEEP = 300;
@@ -46,12 +48,12 @@ export function titleFor(kind: DueItem["kind"]): string {
 }
 
 /** Records announced items with the words that were (or will be) spoken. */
-export function logNotices(items: { kind: DueItem["kind"]; text: string }[], now = new Date()): Promise<void> {
+export function logNotices(items: { kind: DueItem["kind"]; text: string; title?: string; image?: string }[], now = new Date()): Promise<void> {
   if (!items.length) return Promise.resolve();
   const next = queue.then(async () => {
     const log = await readLog();
     let seq = log.at(-1)?.seq ?? 0;
-    for (const i of items) log.push({ seq: ++seq, at: now.toISOString(), kind: i.kind, title: titleFor(i.kind), text: i.text });
+    for (const i of items) log.push({ seq: ++seq, at: now.toISOString(), kind: i.kind, title: i.title ?? titleFor(i.kind), text: i.text, ...(i.image ? { image: i.image } : {}) });
     await fs.mkdir(path.dirname(logPath()), { recursive: true });
     await fs.writeFile(logPath(), JSON.stringify(log.slice(-KEEP)), "utf-8");
   });

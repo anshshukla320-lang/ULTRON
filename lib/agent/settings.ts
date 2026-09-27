@@ -46,6 +46,22 @@ export interface Settings {
   billReminders: boolean;
   /** When to write the evening recap into the journal ("21:30"); "" = off. */
   journalTime: string;
+  /** Each morning: triage unread email and draft replies. */
+  inboxDigest: boolean;
+  /** Log card/UPI payments from bank emails into the expense ledger. */
+  autoExpenses: boolean;
+  /** Follow orders and deliveries from shopping emails. */
+  packageTracking: boolean;
+  /** "Time to leave" for calendar events that have a place. */
+  leaveAlerts: boolean;
+  /** Evening habit check-in time ("20:30"); "" = off. */
+  habitCheckinTime: string;
+  /** Birthday reminders (Google Contacts + ones told to ULTRON). */
+  birthdayReminders: boolean;
+  /** Switch security mode on when the phone leaves home, off when it's back. */
+  securityWhenAway: boolean;
+  /** Warn about plugs left on while out, or running for hours. */
+  energyWarnings: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -69,7 +85,17 @@ export const DEFAULT_SETTINGS: Settings = {
   newsInBriefing: true,
   billReminders: true,
   journalTime: "21:30",
+  inboxDigest: true,
+  autoExpenses: true,
+  packageTracking: true,
+  leaveAlerts: true,
+  habitCheckinTime: "20:30",
+  birthdayReminders: true,
+  securityWhenAway: true,
+  energyWarnings: true,
 };
+
+const time = (v: unknown, fallback: string) => (typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : v === "" ? "" : fallback);
 
 const clamp = (v: unknown, min: number, max: number, fallback: number) => {
   const n = Number(v);
@@ -112,7 +138,15 @@ function sanitize(s: Settings): Settings {
       : [],
     newsInBriefing: s.newsInBriefing !== false,
     billReminders: s.billReminders !== false,
-    journalTime: typeof s.journalTime === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(s.journalTime) ? s.journalTime : s.journalTime === "" ? "" : DEFAULT_SETTINGS.journalTime,
+    journalTime: time(s.journalTime, DEFAULT_SETTINGS.journalTime),
+    inboxDigest: s.inboxDigest !== false,
+    autoExpenses: s.autoExpenses !== false,
+    packageTracking: s.packageTracking !== false,
+    leaveAlerts: s.leaveAlerts !== false,
+    habitCheckinTime: time(s.habitCheckinTime, DEFAULT_SETTINGS.habitCheckinTime),
+    birthdayReminders: s.birthdayReminders !== false,
+    securityWhenAway: s.securityWhenAway !== false,
+    energyWarnings: s.energyWarnings !== false,
   };
 }
 

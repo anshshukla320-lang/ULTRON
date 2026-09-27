@@ -279,7 +279,15 @@ class PhoneActions(private val host: ActionHost, private val prefs: Prefs) : Pho
         }
         Places(ctx).savePlace(name, lat, lon)
         val where = address ?: Places.addressOf(ctx, android.location.Location("").apply { latitude = lat; longitude = lon }) ?: "here"
-        return ToolResult("Saved \"$name\" ($where).")
+        if (!Places.isHome(name)) return ToolResult("Saved \"$name\" ($where).")
+        // Home is watched so the PC knows when the user is out (security mode, "left on" warnings).
+        val background = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            (host.ensurePermissions(Manifest.permission.ACCESS_FINE_LOCATION) && host.ensurePermissions(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+        Places(ctx).registerAll()
+        return ToolResult(
+            "Saved home ($where). ULTRON on the PC will know when you leave and come back (for security mode)." +
+                if (background) "" else " For that to work with the app closed, set Location to \"Allow all the time\".",
+        )
     }
 
     private fun locationTrigger(place: String, on: String, routine: String?, reminder: String?): ToolResult {

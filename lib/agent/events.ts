@@ -7,7 +7,9 @@ import { EventEmitter } from "node:events";
 export type PageEvent =
   | { type: "listen" }
   /** Start/stop recording a meeting on the PC page's microphone. */
-  | { type: "meeting"; action: "start" | "stop"; id: string };
+  | { type: "meeting"; action: "start" | "stop"; id: string }
+  /** Security mode on/off: the PC page watches the webcam while it's on. */
+  | { type: "security"; on: boolean };
 
 const g = globalThis as { __ultronEvents?: EventEmitter };
 const bus = (g.__ultronEvents ??= new EventEmitter().setMaxListeners(50));

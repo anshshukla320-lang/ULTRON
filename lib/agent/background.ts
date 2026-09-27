@@ -20,6 +20,15 @@ import { emitPageEvent } from "./events";
 import { runPowerShell } from "./powershell";
 import { lineFor, logNotices } from "./noticeLog";
 import { eveningRecapDue, writeRecap } from "./journal";
+import { morningInbox } from "./inbox";
+import { periodicExpenseScan } from "./expenseEmails";
+import { packageTick } from "./packages";
+import { leaveNowCheck } from "./travel";
+import { checkPrices } from "./priceWatch";
+import { habitCheckin } from "./habits";
+import { birthdayMorning } from "./birthdays";
+import { sampleEnergy } from "./energy";
+import { tuyaConfigured } from "./tuya";
 
 // Background mode: when no ULTRON page is open, the server itself announces
 // timers, reminders, proactive notices and the daily briefing — as a Windows
@@ -95,6 +104,49 @@ export async function runScheduledRoutines(now = new Date()): Promise<string[]> 
   return ran;
 }
 
+let lastLeaveCheck = 0;
+
+/** Runs one job, never letting it break the others; announces what it returns. */
+async function job(name: string, fn: () => Promise<string[] | unknown[]>): Promise<void> {
+  try {
+    const lines = await fn();
+    for (const l of lines) if (typeof l === "string" && l) await queueNotice(l);
+  } catch (err) {
+    console.error(`ULTRON ${name} failed:`, err instanceof Error ? err.message : err);
+  }
+}
+
+/** The assistant's own rounds: inbox, spending, parcels, travel, prices,
+ *  habits, birthdays, electricity. Each decides for itself whether it's due. */
+async function companionJobs(now: Date, settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
+  const google = !!process.env.GOOGLE_CLIENT_ID;
+  const claude = !!process.env.ANTHROPIC_API_KEY;
+  if (google && claude && settings.inboxDigest) {
+    await job("inbox", async () => {
+      const need = await morningInbox(now);
+      if (!need.length) return [];
+      const who = [...new Set(need.map((i) => i.fromName))];
+      return [`Sir, ${need.length} email${need.length === 1 ? " needs" : "s need"} a reply — from ${who.length > 1 ? `${who.slice(0, -1).join(", ")} and ${who.at(-1)}` : who[0]}. I've drafted answers; just ask me to read them.`];
+    });
+  }
+  if (google && claude && settings.autoExpenses) await job("expense scan", () => periodicExpenseScan(now.getTime()).then(() => []));
+  if (google && claude && settings.packageTracking) await job("packages", () => packageTick(now));
+  // The calendar is asked every few minutes, not every tick.
+  if (google && settings.leaveAlerts && now.getTime() - lastLeaveCheck >= 3 * 60_000) {
+    lastLeaveCheck = now.getTime();
+    await job("leave alerts", () => leaveNowCheck());
+  }
+  await job("price watch", () => checkPrices());
+  if (settings.habitCheckinTime) await job("habits", () => habitCheckin(settings.habitCheckinTime, now));
+  if (settings.birthdayReminders) await job("birthdays", () => birthdayMorning(now));
+  if (tuyaConfigured()) {
+    await job("energy", async () => {
+      const warnings = await sampleEnergy();
+      return settings.energyWarnings ? warnings : [];
+    });
+  }
+}
+
 let lastHousekeeping = 0;
 async function housekeeping(): Promise<void> {
   const now = new Date();
@@ -106,6 +158,7 @@ async function housekeeping(): Promise<void> {
     const recap = await writeRecap(now, now).catch(() => "");
     if (recap && !recap.startsWith("There's nothing")) await queueNotice(`Here's your day, sir. ${recap}`);
   }
+  await companionJobs(now, settings);
   if ((await getSettings()).billReminders && process.env.GOOGLE_CLIENT_ID) {
     const fresh = await dailyBillScan(now).catch(() => []);
     if (fresh.length) {
