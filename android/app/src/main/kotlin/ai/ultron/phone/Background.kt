@@ -140,13 +140,16 @@ class SyncJob : JobService() {
         fun schedule(ctx: Context) {
             val js = ctx.getSystemService(JobScheduler::class.java)
             if (js.getPendingJob(ID) != null) return
-            js.schedule(
-                JobInfo.Builder(ID, ComponentName(ctx, SyncJob::class.java))
-                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                    .setPeriodic(15 * 60_000L)
-                    .setPersisted(true)
-                    .build(),
-            )
+            // Never worth crashing over: the app works without it, just no notifications.
+            runCatching {
+                js.schedule(
+                    JobInfo.Builder(ID, ComponentName(ctx, SyncJob::class.java))
+                        .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                        .setPeriodic(15 * 60_000L)
+                        .setPersisted(true)
+                        .build(),
+                )
+            }.onFailure { Log.w("UltronSync", "couldn't schedule: ${it.message}") }
         }
     }
 }
