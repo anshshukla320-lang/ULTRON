@@ -19,6 +19,8 @@ export class WhisperRecognizer {
   getMode: (() => "wake" | "command") | null = null;
   /** Voice lock turned an utterance away (not the owner's voice). */
   onrejected: (() => void) | null = null;
+  /** Who voice ID says spoke the utterance that follows (family mode). */
+  onspeaker: ((speaker: { key: string; name: string } | null) => void) | null = null;
 
   private running = false;
   private stream: MediaStream | null = null;
@@ -93,13 +95,16 @@ export class WhisperRecognizer {
         headers: { "Content-Type": "audio/wav" },
         body: encodeWav(audio) as unknown as BodyInit,
       });
-      const data = (await res.json()) as { text?: string; error?: string; rejected?: boolean };
+      const data = (await res.json()) as { text?: string; error?: string; rejected?: boolean; speaker?: { key: string; name: string } };
       if (!res.ok) {
         this.onerror?.({ error: data.error ?? "transcription failed" });
         return;
       }
       if (data.rejected) this.onrejected?.();
-      else if (data.text && this.running) this.emit(data.text, true);
+      else if (data.text && this.running) {
+        this.onspeaker?.(data.speaker ?? null);
+        this.emit(data.text, true);
+      }
     } catch {
       this.onerror?.({ error: "network" });
     } finally {

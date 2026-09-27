@@ -4,9 +4,10 @@ import { EventEmitter } from "node:events";
 // /api/events. Kept on globalThis because route handlers and background
 // services can be bundled as separate module instances in one process.
 
-export interface PageEvent {
-  type: "listen";
-}
+export type PageEvent =
+  | { type: "listen" }
+  /** Start/stop recording a meeting on the PC page's microphone. */
+  | { type: "meeting"; action: "start" | "stop"; id: string };
 
 const g = globalThis as { __ultronEvents?: EventEmitter };
 const bus = (g.__ultronEvents ??= new EventEmitter().setMaxListeners(50));

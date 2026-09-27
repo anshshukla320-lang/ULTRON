@@ -44,6 +44,8 @@ export interface Settings {
   newsInBriefing: boolean;
   /** Scan Gmail daily for bills and set reminders before they're due. */
   billReminders: boolean;
+  /** When to write the evening recap into the journal ("21:30"); "" = off. */
+  journalTime: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -66,6 +68,7 @@ export const DEFAULT_SETTINGS: Settings = {
   stockWatchlist: [],
   newsInBriefing: true,
   billReminders: true,
+  journalTime: "21:30",
 };
 
 const clamp = (v: unknown, min: number, max: number, fallback: number) => {
@@ -109,6 +112,7 @@ function sanitize(s: Settings): Settings {
       : [],
     newsInBriefing: s.newsInBriefing !== false,
     billReminders: s.billReminders !== false,
+    journalTime: typeof s.journalTime === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(s.journalTime) ? s.journalTime : s.journalTime === "" ? "" : DEFAULT_SETTINGS.journalTime,
   };
 }
 

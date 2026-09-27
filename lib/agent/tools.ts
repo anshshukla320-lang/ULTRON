@@ -37,6 +37,11 @@ import { checkBills } from "./bills";
 import { readClipboard, writeClipboard } from "./clipboard";
 import { listEnglishVoices } from "./piperTts";
 import { updateSettings } from "./settings";
+import { addJournalEntry, readJournal, searchJournal, writeRecap } from "./journal";
+import { healthSummary } from "./health";
+import { activeMeeting, startMeeting, stopMeeting, waitForFinalChunk } from "./meetings";
+import { findWhisper } from "./whisperStt";
+import { emitPageEvent } from "./events";
 import { operateComputer } from "./computerUse";
 import { getSettings } from "./settings";
 import { getWeather } from "./weather";
@@ -138,6 +143,13 @@ export type ToolName =
   | "read_clipboard"
   | "write_clipboard"
   | "set_voice"
+  | "journal_add"
+  | "journal_read"
+  | "journal_search"
+  | "day_recap"
+  | "health_summary"
+  | "start_meeting_notes"
+  | "stop_meeting_notes"
   | "operate_computer";
 
 /** Tools in here run immediately. Anything not listed requires the user to
@@ -227,6 +239,13 @@ export const AUTO_EXECUTE: ReadonlySet<ToolName> = new Set([
   "read_clipboard",
   "write_clipboard",
   "set_voice",
+  "journal_add",
+  "journal_read",
+  "journal_search",
+  "day_recap",
+  "health_summary",
+  "start_meeting_notes",
+  "stop_meeting_notes",
   // send_whatsapp and smart_home_security need confirmation too.
   // power_action and clean_disk_junk deliberately need confirmation.
 ]);
@@ -1127,6 +1146,41 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: { voice: { type: "string" }, speed: { type: "number" } }, required: [] },
   },
   {
+    name: "journal_add",
+    description: "Write something in the user's private journal for today ('note in my journal that…', 'remember for my diary…').",
+    input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+  },
+  {
+    name: "journal_read",
+    description: "Read one day of the journal: ULTRON's evening recap of that day plus the user's notes. For 'what did I do last Tuesday / yesterday / on 22 September'.",
+    input_schema: { type: "object", properties: { day: { type: "string", description: "today, yesterday, a weekday name, or a date" } }, required: ["day"] },
+  },
+  {
+    name: "journal_search",
+    description: "Find journal days that mention something ('when did I last go to the gym?').",
+    input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+  },
+  {
+    name: "day_recap",
+    description: "Write (or rewrite) the recap of a day now, from that day's conversations, reminders, meetings, screen time and health. It also runs by itself every evening.",
+    input_schema: { type: "object", properties: { day: { type: "string", description: "Default today" } }, required: [] },
+  },
+  {
+    name: "health_summary",
+    description: "Steps, sleep and heart rate from the user's phone (Health Connect), per day.",
+    input_schema: { type: "object", properties: { days: { type: "number", description: "How many days back, default 7" } }, required: [] },
+  },
+  {
+    name: "start_meeting_notes",
+    description: "Start recording a meeting on this PC's microphone to take notes (transcribed on the PC). Say it's recording and that the user can say 'stop the meeting notes' when done.",
+    input_schema: { type: "object", properties: { title: { type: "string", description: "What the meeting is, if said" } }, required: [] },
+  },
+  {
+    name: "stop_meeting_notes",
+    description: "Stop recording the meeting and write the notes: summary, decisions, action items (added to Google Tasks when connected). Speak the returned gist.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "operate_computer",
     description:
       "Carry out a multi-step task on the user's PC by looking at the screen and using the mouse and keyboard — e.g. filling in a form, renaming files in Explorer, changing a setting in an app, finding something on a website. Needs the user's confirmation. Describe the task completely and concretely (which app/site, what to do, when to stop). It will not enter passwords or payment details, buy things, send messages, or delete files. Prefer a dedicated tool when one exists — this is slower.",
@@ -1159,6 +1213,28 @@ export type ToolOutput =
   | { text: string; document: { mediaType: "application/pdf"; data: string } };
 
 const KNOWN_TOOL_NAMES = new Set<string>(TOOLS.map((t) => t.name));
+
+/** Things only the PC's owner may have done — refused when voice ID says a
+ *  family member is speaking. */
+export const OWNER_ONLY: ReadonlySet<string> = new Set([
+  "send_email",
+  "send_whatsapp",
+  "run_code",
+  "install_app",
+  "write_file",
+  "power_action",
+  "operate_computer",
+  "clean_disk_junk",
+  "smart_home_security",
+  "save_routine",
+  "delete_routine",
+  "forget",
+  "set_proactive",
+  "set_daily_briefing",
+  "check_bills",
+  "read_email",
+  "list_emails",
+]);
 
 /** What routines may contain and which of their steps run without asking. */
 export const TOOL_POLICY: ToolPolicy = {
@@ -1453,6 +1529,35 @@ export async function executeTool(
       return writeClipboard(String(input.text ?? ""));
     case "set_voice":
       return setVoice(input.voice ? String(input.voice) : undefined, input.speed !== undefined ? Number(input.speed) : undefined);
+    case "journal_add":
+      return addJournalEntry(String(input.text ?? ""));
+    case "journal_read":
+      return readJournal(String(input.day ?? "today"));
+    case "journal_search":
+      return searchJournal(String(input.query ?? ""));
+    case "day_recap":
+      return writeRecap(input.day ? String(input.day) : "today");
+    case "health_summary":
+      return healthSummary(input.days !== undefined ? Number(input.days) : 7);
+    case "start_meeting_notes": {
+      if (!(await findWhisper())) throw new Error("Meeting notes need local Whisper on the PC (scripts\\install-whisper.ps1).");
+      const running = await activeMeeting();
+      if (running) return `Already recording "${running.title}" (${running.minutes} min so far).`;
+      const m = await startMeeting(input.title ? String(input.title) : "");
+      if (emitPageEvent({ type: "meeting", action: "start", id: m.id }) === 0) {
+        await stopMeeting().catch(() => {});
+        throw new Error("The ULTRON page needs to be open on the PC to record from its microphone. (On the phone, use its Record meeting button.)");
+      }
+      return `Recording "${m.title}" on the PC's microphone.`;
+    }
+    case "stop_meeting_notes": {
+      const running = await activeMeeting();
+      if (!running) return "No meeting is being recorded.";
+      emitPageEvent({ type: "meeting", action: "stop", id: running.id });
+      await waitForFinalChunk();
+      const { spoken, file } = await stopMeeting();
+      return file ? `${spoken}\n(Notes saved to ${file}.)` : spoken;
+    }
     case "operate_computer": {
       if (!(await getSettings()).computerUse) throw new Error("Operating the computer is switched off in Settings.");
       return operateComputer(String(input.task ?? ""), {

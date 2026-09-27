@@ -5,6 +5,7 @@ import { getWeather } from "./weather";
 import { listReminders } from "./reminders";
 import { getNews, getStockPrices } from "./liveInfo";
 import { getSettings } from "./settings";
+import { healthForBriefing, readHealth } from "./health";
 
 /**
  * Gathers everything for a spoken morning briefing in one tool call:
@@ -27,6 +28,7 @@ export async function morningBriefing(location?: string): Promise<string> {
   ];
   const settings = await getSettings();
   if (settings.newsInBriefing) sections.push(["Top headlines", getNews("", 4)]);
+  if ((await readHealth()).length) sections.push(["Health (from the phone)", healthForBriefing()]);
   if (settings.stockWatchlist.length) sections.push(["Stocks the user follows", getStockPrices(settings.stockWatchlist.join(", "))]);
   const results = await Promise.allSettled(sections.map(([, p]) => p));
   return sections

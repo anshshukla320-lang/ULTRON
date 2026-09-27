@@ -24,6 +24,7 @@ interface Settings {
   stockWatchlist: string[];
   newsInBriefing: boolean;
   billReminders: boolean;
+  journalTime: string;
 }
 
 interface Snapshot {
@@ -43,6 +44,7 @@ interface Snapshot {
   routines: { id: string; name: string; steps: string[]; schedule: string | null }[];
   voices: string[];
   voiceId: { enrolled: boolean; clips: number; whisperInstalled: boolean };
+  family: { key: string; name: string; clips: number; enrolled: boolean }[];
   integrations: { google: boolean; homeAssistant: boolean; smartLife: boolean; tv: string | null; telegram: boolean; homeLocation: string | null };
 }
 
@@ -101,6 +103,8 @@ export default function SettingsPage() {
   const [hotkey, setHotkey] = useState("");
   const [stocks, setStocks] = useState("");
   const [recording, setRecording] = useState<string | null>(null);
+  const [newMember, setNewMember] = useState("");
+  const [journalTime, setJournalTime] = useState("");
 
   const load = useCallback(async () => {
     const res = await fetch("/api/settings");
@@ -111,6 +115,7 @@ export default function SettingsPage() {
     setBriefing(d.reminders.briefingTime ?? "");
     setHotkey(d.settings.hotkey);
     setStocks(d.settings.stockWatchlist.join(", "));
+    setJournalTime(d.settings.journalTime);
   }, []);
 
   useEffect(() => {
@@ -138,19 +143,22 @@ export default function SettingsPage() {
     void new Audio(URL.createObjectURL(await res.blob())).play();
   };
 
-  const enroll = async (reset = false) => {
+  /** Records one sentence for the owner (no name) or a family member. */
+  const enroll = async (reset = false, name = "") => {
     setError("");
+    const who = name ? `&name=${encodeURIComponent(name)}` : "";
     try {
       if (reset) {
-        await fetch("/api/voiceid?action=reset", { method: "POST" });
+        await fetch(`/api/voiceid?action=reset${who}`, { method: "POST" });
         await load();
         return;
       }
-      const phrase = ENROLL_PHRASES[(data?.voiceId.clips ?? 0) % ENROLL_PHRASES.length];
-      setRecording(phrase);
+      const done = name ? data?.family.find((f) => f.name.toLowerCase() === name.toLowerCase())?.clips ?? 0 : data?.voiceId.clips ?? 0;
+      const phrase = ENROLL_PHRASES[done % ENROLL_PHRASES.length];
+      setRecording(name ? `${name}, read aloud: "${phrase}"` : phrase);
       const wav = await recordClip(5);
       setRecording(null);
-      const res = await fetch("/api/voiceid?action=enroll", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav as unknown as BodyInit });
+      const res = await fetch(`/api/voiceid?action=enroll${who}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav as unknown as BodyInit });
       const d = await res.json();
       if (!res.ok) setError(d.error ?? "Couldn't use that recording.");
       await load();
@@ -280,6 +288,51 @@ export default function SettingsPage() {
             Voice lock strictness <small>{s.voiceLockThreshold.toFixed(2)} — raise it if others get through, lower it if you&apos;re ignored.</small>
           </span>
           <input type="range" min={0.3} max={0.8} step={0.05} defaultValue={s.voiceLockThreshold} onMouseUp={(e) => update({ voiceLockThreshold: Number((e.target as HTMLInputElement).value) })} onKeyUp={(e) => update({ voiceLockThreshold: Number((e.target as HTMLInputElement).value) })} />
+        </label>
+      </section>
+
+      <section>
+        <h2>Family</h2>
+        <p className="set-small">
+          ULTRON tells people apart by voice (needs local Whisper): it greets them by name, keeps their notes apart, and won&apos;t do owner-only
+          things for them — email, messages, the PC&apos;s power, running code, files, locks. Record your own voice above first.
+        </p>
+        {data.family.map((f) => (
+          <div key={f.key} className="set-item">
+            <span>
+              <b>{f.name}</b> <small>{f.enrolled ? `learned (${f.clips} recordings)` : `${f.clips} of 3 recordings`}</small>
+            </span>
+            <span>
+              <button className="hud-btn" disabled={Boolean(recording)} onClick={() => void enroll(false, f.name)}>
+                RECORD
+              </button>{" "}
+              <button className="hud-btn" onClick={() => void enroll(true, f.name)}>
+                REMOVE
+              </button>
+            </span>
+          </div>
+        ))}
+        <div className="set-item">
+          <input value={newMember} placeholder="Name, e.g. Priya" onChange={(e) => setNewMember(e.target.value)} />
+          <button
+            className="hud-btn"
+            disabled={Boolean(recording) || !newMember.trim()}
+            onClick={() => void enroll(false, newMember.trim()).then(() => setNewMember(""))}
+          >
+            ADD
+          </button>
+        </div>
+        {recording && <p className="set-small">Recording — {recording}</p>}
+      </section>
+
+      <section>
+        <h2>Journal</h2>
+        <label className="set-row">
+          <span>
+            Evening recap
+            <small>24-hour time ULTRON writes up your day in your journal (and tells you). Empty = off.</small>
+          </span>
+          <input value={journalTime} placeholder="21:30" onChange={(e) => setJournalTime(e.target.value)} onBlur={() => update({ journalTime: journalTime.trim() })} />
         </label>
       </section>
 

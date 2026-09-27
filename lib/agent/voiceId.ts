@@ -17,8 +17,17 @@ export const MIN_ENROLL_CLIPS = 3;
 function dir(): string {
   return path.join(os.homedir(), ".ultron", "voiceid");
 }
-function profilePath(): string {
-  return path.join(dir(), "owner.json");
+export const OWNER = "owner";
+
+/** A person's name as a safe file name ("owner" is the PC's owner). */
+export function profileKey(name: string): string {
+  const k = name.trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 40);
+  if (!k) throw new Error("Give the person a name.");
+  return k;
+}
+
+function profilePath(name = OWNER): string {
+  return path.join(dir(), `${profileKey(name)}.json`);
 }
 function modelPath(): string {
   return path.join(dir(), MODEL_NAME);
@@ -27,6 +36,8 @@ function modelPath(): string {
 interface Profile {
   embeddings: number[][];
   updatedAt: string;
+  /** How to address them ("Priya"); the owner has none. */
+  displayName?: string;
 }
 
 /** 16-bit PCM WAV (what the page records) → samples in -1..1. */
@@ -123,9 +134,9 @@ export async function embed(wav: Buffer): Promise<number[]> {
   return Array.from(ex.compute(stream, false));
 }
 
-async function readProfile(): Promise<Profile | null> {
+async function readProfile(name = OWNER): Promise<Profile | null> {
   try {
-    return JSON.parse(await fs.readFile(profilePath(), "utf-8")) as Profile;
+    return JSON.parse(await fs.readFile(profilePath(name), "utf-8")) as Profile;
   } catch {
     return null;
   }
@@ -136,19 +147,53 @@ export async function voiceIdStatus(): Promise<{ enrolled: boolean; clips: numbe
   return { enrolled: (p?.embeddings.length ?? 0) >= MIN_ENROLL_CLIPS, clips: p?.embeddings.length ?? 0 };
 }
 
-/** Adds one enrollment clip. */
-export async function enrollClip(wav: Buffer): Promise<{ clips: number; enrolled: boolean }> {
+/** Adds one enrollment clip for the owner, or for a family member by name. */
+export async function enrollClip(wav: Buffer, name = OWNER): Promise<{ clips: number; enrolled: boolean }> {
   const e = await embed(wav);
-  const p = (await readProfile()) ?? { embeddings: [], updatedAt: "" };
+  const p = (await readProfile(name)) ?? { embeddings: [], updatedAt: "" };
   p.embeddings = [...p.embeddings, e].slice(-8);
   p.updatedAt = new Date().toISOString();
+  if (profileKey(name) !== OWNER) p.displayName = name.trim().slice(0, 40);
   await fs.mkdir(dir(), { recursive: true });
-  await fs.writeFile(profilePath(), JSON.stringify(p), "utf-8");
+  await fs.writeFile(profilePath(name), JSON.stringify(p), "utf-8");
   return { clips: p.embeddings.length, enrolled: p.embeddings.length >= MIN_ENROLL_CLIPS };
 }
 
-export async function resetVoiceId(): Promise<void> {
-  await fs.rm(profilePath(), { force: true });
+export async function resetVoiceId(name = OWNER): Promise<void> {
+  await fs.rm(profilePath(name), { force: true });
+}
+
+/** Everyone whose voice ULTRON knows: owner first. */
+export async function listVoiceProfiles(): Promise<{ key: string; name: string; clips: number; enrolled: boolean }[]> {
+  let files: string[] = [];
+  try {
+    files = (await fs.readdir(dir())).filter((f) => f.endsWith(".json"));
+  } catch {
+    return [];
+  }
+  const out: { key: string; name: string; clips: number; enrolled: boolean }[] = [];
+  for (const f of files) {
+    const key = f.slice(0, -5);
+    const p = await readProfile(key);
+    if (!p) continue;
+    out.push({ key, name: key === OWNER ? "You" : p.displayName ?? key, clips: p.embeddings.length, enrolled: p.embeddings.length >= MIN_ENROLL_CLIPS });
+  }
+  return out.sort((a, b) => (a.key === OWNER ? -1 : b.key === OWNER ? 1 : a.name.localeCompare(b.name)));
+}
+
+/** Who is speaking: the best-matching enrolled person and how sure (0–1), or null when nobody is enrolled. */
+export async function identifySpeaker(wav: Buffer): Promise<{ key: string; name: string; score: number } | null> {
+  const people = (await listVoiceProfiles()).filter((p) => p.enrolled);
+  if (!people.length) return null;
+  const e = await embed(wav);
+  let best: { key: string; name: string; score: number } | null = null;
+  for (const person of people) {
+    const p = await readProfile(person.key);
+    if (!p) continue;
+    const score = scoreAgainst(p.embeddings, e);
+    if (!best || score > best.score) best = { key: person.key, name: person.name, score };
+  }
+  return best;
 }
 
 /** How much a clip sounds like the owner (0–1), or null when nobody is enrolled. */

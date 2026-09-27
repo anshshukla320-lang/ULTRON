@@ -8,6 +8,7 @@ import { describeSignals, parseSignals } from "@/lib/agent/signals";
 import { getSettings } from "@/lib/agent/settings";
 import { spentToday } from "@/lib/agent/usage";
 import { parseClientTools, PHONE_CHANNEL_NOTE } from "@/lib/agent/clientTools";
+import { listVoiceProfiles, OWNER } from "@/lib/agent/voiceId";
 
 export const runtime = "nodejs";
 
@@ -42,14 +43,24 @@ export async function POST(req: Request) {
     : { messages: Array.isArray(body.messages) ? body.messages : [] };
 
   const clientTools = parseClientTools(body.clientTools);
+  // Family mode: who the page's voice ID says is talking (only enrolled people count).
+  const speakerKey = typeof body.speaker === "string" ? body.speaker : "";
+  const speaker = speakerKey ? (await listVoiceProfiles()).find((p) => p.key === speakerKey && p.enrolled) : undefined;
+  const guest = speaker && speaker.key !== OWNER ? speaker.name : undefined;
+  const whoNote = speaker
+    ? guest
+      ? `Speaking right now: ${guest}, a member of the owner's family (recognised by voice) — not the owner. Address them by name. Their own facts go into memory as "${guest}: …". Owner-only actions (email, messages as the owner, the PC's power, running code, files, security devices, routines) are refused for them; say so kindly if asked.`
+      : "Speaking right now: the owner (recognised by voice)."
+    : "";
   const events = runAgent(start, {
     client: new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }),
     system: buildSystemBlocks(await recallMemoryForPrompt(), new Date(), {
       recentConversations: await recentEpisodesForPrompt(),
       speaking: describeSignals(parseSignals(body.signals)),
-      ...(body.client === "android" ? { channel: PHONE_CHANNEL_NOTE } : {}),
+      ...(body.client === "android" || whoNote ? { channel: [body.client === "android" ? PHONE_CHANNEL_NOTE : "", whoNote].filter(Boolean).join("\n\n") } : {}),
     }),
     clientTools,
+    guest,
     // Fires when the browser aborts the fetch (the user said "stop"), so we
     // stop paying for tokens nobody will hear.
     signal: req.signal,

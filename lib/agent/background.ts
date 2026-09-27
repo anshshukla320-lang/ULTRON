@@ -18,6 +18,8 @@ import { recordSample } from "./screenTime";
 import { startDesktopHelper, type HelperHandle, type HelperLine } from "./desktopHelper";
 import { emitPageEvent } from "./events";
 import { runPowerShell } from "./powershell";
+import { lineFor, logNotices } from "./noticeLog";
+import { eveningRecapDue, writeRecap } from "./journal";
 
 // Background mode: when no ULTRON page is open, the server itself announces
 // timers, reminders, proactive notices and the daily briefing — as a Windows
@@ -38,14 +40,11 @@ export interface BackgroundDeps {
   takeFocusDue?: () => Promise<DueItem[]>;
   /** Work that happens whether or not a page is open: scheduled routines, the daily bill scan. */
   housekeeping?: () => Promise<void>;
+  /** Keeps a copy for the phone app's notifications. */
+  log?: (items: { kind: DueItem["kind"]; text: string }[]) => Promise<void>;
 }
 
-/** Spoken/written line for one due item (same wording as the page uses). */
-export function lineFor(item: DueItem): string {
-  if (item.kind === "timer") return `Sir, your ${item.text} timer is done.`;
-  if (item.kind === "reminder") return `Sir, a reminder: ${item.text}.`;
-  return item.text;
-}
+export { lineFor };
 
 async function runBriefing(): Promise<string> {
   if (!process.env.ANTHROPIC_API_KEY) return "Good morning, sir. I couldn't prepare the briefing — the Claude API key isn't set.";
@@ -102,6 +101,11 @@ async function housekeeping(): Promise<void> {
   if (now.getTime() - lastHousekeeping < 30_000) return;
   lastHousekeeping = now.getTime();
   await runScheduledRoutines(now);
+  const settings = await getSettings();
+  if (settings.journalTime && process.env.ANTHROPIC_API_KEY && (await eveningRecapDue(settings.journalTime, now))) {
+    const recap = await writeRecap(now, now).catch(() => "");
+    if (recap && !recap.startsWith("There's nothing")) await queueNotice(`Here's your day, sir. ${recap}`);
+  }
   if ((await getSettings()).billReminders && process.env.GOOGLE_CLIENT_ID) {
     const fresh = await dailyBillScan(now).catch(() => []);
     if (fresh.length) {
@@ -115,6 +119,7 @@ async function housekeeping(): Promise<void> {
 }
 
 export const defaultBackgroundDeps: BackgroundDeps = {
+  log: (items) => logNotices(items),
   takeFocusDue: () => takeFocusDue(),
   housekeeping,
   pageIsOpen: () => pageIsOpen(),
@@ -140,6 +145,7 @@ export async function backgroundTick(deps: BackgroundDeps = defaultBackgroundDep
   const settings = await deps.settings();
   for (const item of due) {
     const text = item.kind === "briefing" ? await deps.briefing() : lineFor(item);
+    await deps.log?.([{ kind: item.kind, text }]).catch(() => {});
     const title = item.kind === "briefing" ? "Morning briefing" : item.kind === "notice" ? "ULTRON" : item.kind === "timer" ? "Timer done" : "Reminder";
     if (settings.backgroundNotifications) await deps.notify(title, text).catch((e) => console.error("ULTRON notification failed:", e));
     // Nobody at the PC may hear it — the phone gets it too, if set up.

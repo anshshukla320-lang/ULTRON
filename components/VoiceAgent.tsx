@@ -7,6 +7,7 @@ import { SentenceChunker } from "@/lib/sentenceChunker";
 import { SpeechPlayer } from "@/lib/speechPlayer";
 import { WhisperRecognizer } from "@/lib/whisperRecognizer";
 import { PresenceWatcher } from "@/lib/presenceWatcher";
+import { MeetingRecorder } from "@/lib/meetingRecorder";
 import { detectWake, isRepeatOf, isStopCommand, leadingWakeCommand, looksLikeEcho, stripLeadingWake } from "@/lib/voiceCommands";
 
 type AgentStatus = "wake" | "listening" | "thinking" | "speaking" | "confirm" | "unsupported";
@@ -164,6 +165,9 @@ export default function VoiceAgent() {
   // Plain transcript of the current conversation, handed to the memory
   // summarizer when the conversation ends.
   const transcriptRef = useRef<Anthropic.MessageParam[]>([]);
+  // Family mode: who voice ID says is talking (sent with each request).
+  const speakerRef = useRef<{ key: string; name: string } | null>(null);
+  const meetingRef = useRef<MeetingRecorder | null>(null);
 
   const player = () => (playerRef.current ??= new SpeechPlayer());
 
@@ -281,7 +285,12 @@ export default function VoiceAgent() {
         const res = await fetch("/api/agent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: messagesRef.current, resolution, signals: resolution ? undefined : signalsRef.current }),
+          body: JSON.stringify({
+            messages: messagesRef.current,
+            resolution,
+            signals: resolution ? undefined : signalsRef.current,
+            speaker: speakerRef.current?.key,
+          }),
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {
@@ -402,8 +411,27 @@ export default function VoiceAgent() {
   useEffect(() => {
     const events = new EventSource("/api/events");
     events.addEventListener("listen", () => listenNow());
+    // ULTRON asked this page to record a meeting (start_meeting_notes).
+    events.addEventListener("meeting", (e) => {
+      const { action, id } = JSON.parse((e as MessageEvent).data) as { action: "start" | "stop"; id: string };
+      if (action === "start" && !meetingRef.current) {
+        const rec = new MeetingRecorder(id, (msg) => pushLog("error", msg));
+        meetingRef.current = rec;
+        rec.start().then(
+          () => pushLog("action", "● Recording the meeting…"),
+          (err) => {
+            meetingRef.current = null;
+            pushLog("error", `Couldn't record the meeting: ${err instanceof Error ? err.message : String(err)}`);
+          },
+        );
+      } else if (action === "stop" && meetingRef.current) {
+        const rec = meetingRef.current;
+        meetingRef.current = null;
+        void rec.stop().then(() => pushLog("action", "■ Meeting recording stopped."));
+      }
+    });
     return () => events.close();
-  }, [listenNow]);
+  }, [listenNow, pushLog]);
 
   // Opened by the hotkey when no page was open: listen once the mic is up.
   useEffect(() => {
@@ -481,6 +509,9 @@ export default function VoiceAgent() {
       // model first — the offline wake word.
       wr.getMode = () => (wakeModeRef.current && statusRef.current === "wake" ? "wake" : "command");
       let lastRejectLog = 0;
+      wr.onspeaker = (s) => {
+        speakerRef.current = s;
+      };
       wr.onrejected = () => {
         if (Date.now() - lastRejectLog < 60_000) return;
         lastRejectLog = Date.now();

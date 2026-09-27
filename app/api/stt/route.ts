@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { findWhisper, transcribeWav } from "@/lib/agent/whisperStt";
 import { getSettings } from "@/lib/agent/settings";
-import { ownerScore, voiceIdStatus } from "@/lib/agent/voiceId";
+import { identifySpeaker, listVoiceProfiles, OWNER, voiceIdStatus } from "@/lib/agent/voiceId";
 import { detectWake, isStopCommand } from "@/lib/voiceCommands";
 
 export const runtime = "nodejs";
@@ -13,7 +13,9 @@ export async function GET() {
   const settings = await getSettings();
   const installed = Boolean(await findWhisper());
   // Voice lock needs the audio itself, which only the Whisper path has.
-  const wantWhisper = settings.sttEngine === "whisper" || settings.voiceLock;
+  // Family mode (telling voices apart) needs it too.
+  const family = (await listVoiceProfiles()).filter((p) => p.key !== OWNER && p.enrolled).length > 0;
+  const wantWhisper = settings.sttEngine === "whisper" || settings.voiceLock || family;
   return NextResponse.json({
     engine: wantWhisper && installed ? "whisper" : "browser",
     language: settings.sttLanguage,
@@ -52,22 +54,27 @@ export async function POST(req: Request) {
       text = await transcribeWav(buf, settings.sttLanguage);
     }
 
-    // Voice lock: someone who isn't the owner is simply not heard. Only
-    // checked when there's something to act on (and wake-mode chatter
-    // without the wake word never reaches the agent anyway).
-    if (text && settings.voiceLock && (!wakeMode || detectWake(text) !== null)) {
-      let score: number | null;
+    // Who's speaking (voice lock and family mode). Only checked when there's
+    // something to act on — wake-mode chatter without the wake word never
+    // reaches the agent anyway.
+    let speaker: { key: string; name: string } | undefined;
+    const profiles = (await listVoiceProfiles()).filter((p) => p.enrolled);
+    if (text && profiles.length && (!wakeMode || detectWake(text) !== null)) {
+      let best: { key: string; name: string; score: number } | null = null;
+      let tooShort = false;
       try {
-        score = await ownerScore(buf);
+        best = await identifySpeaker(buf);
       } catch {
-        // Too short to judge ("stop"): let a stop through, nothing else.
-        score = isStopCommand(text) ? 1 : 0;
+        tooShort = true;
       }
-      if (score !== null && score < settings.voiceLockThreshold) {
-        return NextResponse.json({ text: "", rejected: true, score: Math.round(score * 100) / 100 });
+      if (best && best.score >= settings.voiceLockThreshold) speaker = { key: best.key, name: best.name };
+      // Voice lock: someone ULTRON doesn't know is simply not heard. A clip too
+      // short to judge ("stop") may still stop it, nothing else.
+      if (settings.voiceLock && !speaker && !(tooShort && isStopCommand(text))) {
+        return NextResponse.json({ text: "", rejected: true, score: best ? Math.round(best.score * 100) / 100 : null });
       }
     }
-    return NextResponse.json({ text });
+    return NextResponse.json({ text, ...(speaker ? { speaker } : {}) });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 503 });
   }

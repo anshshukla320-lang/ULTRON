@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { TOOLS, confirmationInput, executeTool, needsConfirmation, type ToolName, type ToolOutput } from "./tools";
+import { OWNER_ONLY, TOOLS, confirmationInput, executeTool, needsConfirmation, type ToolName, type ToolOutput } from "./tools";
 import { stashPendingAction, takePendingAction, type PendingToolUse } from "./pendingActions";
 import { repairToolPairs, stripImages, trimHistory } from "./conversationHistory";
 import { recordUsage, type Feature } from "./usage";
@@ -94,6 +94,8 @@ export interface AgentDeps {
   /** Tools that run on the client (the phone app: calls, SMS, alarms…).
    *  Claude can call them; the turn then pauses and hands them back. */
   clientTools?: Anthropic.Tool[];
+  /** A family member (not the owner) is speaking: owner-only tools are refused. */
+  guest?: string;
 }
 
 interface ReadyResult {
@@ -267,6 +269,12 @@ export async function* runAgent(start: AgentStart, deps: AgentDeps): AsyncGenera
     for (const b of toolUseBlocks) {
       const input = b.input as Record<string, unknown>;
       if (clientToolNames.has(b.name)) continue; // the phone runs these
+      if (deps.guest && OWNER_ONLY.has(b.name)) {
+        const msg = `Not allowed: ${deps.guest} isn't the owner, and only the owner can use ${b.name}.`;
+        readyResults.push({ id: b.id, output: msg, isError: true });
+        yield { type: "action", action: { name: b.name, input, output: msg, status: "error" } };
+        continue;
+      }
       if (!KNOWN_TOOLS.has(b.name)) {
         const msg = `There is no tool named "${b.name}".`;
         readyResults.push({ id: b.id, output: msg, isError: true });

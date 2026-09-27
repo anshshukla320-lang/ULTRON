@@ -7,7 +7,7 @@ import { getProactiveState, setProactive } from "@/lib/agent/proactive";
 import { usageSummary } from "@/lib/agent/usage";
 import { deleteRoutine, describeSchedule, listRoutinesRaw } from "@/lib/agent/routines";
 import { listEnglishVoices } from "@/lib/agent/piperTts";
-import { voiceIdStatus } from "@/lib/agent/voiceId";
+import { listVoiceProfiles, voiceIdStatus } from "@/lib/agent/voiceId";
 import { findWhisper } from "@/lib/agent/whisperStt";
 
 export const runtime = "nodejs";
@@ -40,6 +40,7 @@ async function snapshot() {
     })),
     voices,
     voiceId: { ...voiceId, whisperInstalled: Boolean(whisper) },
+    family: (await listVoiceProfiles()).filter((p) => p.key !== "owner"),
     integrations: {
       google: Boolean(process.env.GOOGLE_CLIENT_ID),
       homeAssistant: Boolean(process.env.HOME_ASSISTANT_URL && process.env.HOME_ASSISTANT_TOKEN),
